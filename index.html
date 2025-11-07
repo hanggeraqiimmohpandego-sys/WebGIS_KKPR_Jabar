@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Web GIS KKPR</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin:0; padding:0; font-family: Arial, sans-serif; }
+        #map { height: 90vh; width: 100%; }
+        h2 { text-align: center; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h2>Web GIS KKPR</h2>
+    <div id="map"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // 1. Buat map
+        var map = L.map('map').setView([-6.9, 107.6], 10); // ganti koordinat sesuai lokasi KKPR
+
+        // 2. Tambahkan base map OSM
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        // 3. Load GeoJSON
+        fetch("data/kkpr.json")
+        .then(response => response.json())
+        .then(data => {
+            L.geoJSON(data, {
+                onEachFeature: function(feature, layer) {
+                    // Ambil nomor KKPR dari properti GeoJSON
+                    var nomor = feature.properties.NOMOR || "No_KKPR";
+                    var pdfLink = "lampiran/" + nomor + ".pdf";
+
+                    // Bind popup
+                    layer.bindPopup(
+                        "<b>Nomor KKPR:</b> " + nomor +
+                        "<br><a href='" + pdfLink + "' target='_blank'>Lihat Lampiran PDF</a>"
+                    );
+                }
+            }).addTo(map);
+        })
+        .catch(err => console.log("Error loading GeoJSON:", err));
+    </script>
+</body>
+</html>
