@@ -1,21 +1,41 @@
-fetch("data/kkpr.json")
-.then(response => response.json())
-.then(data => {
-    L.geoJSON(data, {
-        onEachFeature: function(feature, layer) {
-            // Ambil nomor KKPR sesuai properti GeoJSON
-            var nomor = feature.properties["No_KKPR"];
-            if(!nomor) {
-                nomor = "No_KKPR"; // fallback kalau kolom tidak ada
-            }
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Debug WebGIS KKPR</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        #map { height: 90vh; width: 100%; }
+    </style>
+</head>
+<body>
+    <h2>Debug GeoJSON KKPR</h2>
+    <div id="map"></div>
 
-            var pdfLink = "lampiran/" + nomor + ".pdf";
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        var map = L.map('map').setView([-6.9, 107.6], 10);
 
-            layer.bindPopup(
-                "<b>Nomor KKPR:</b> " + nomor +
-                "<br><a href='" + pdfLink + "' target='_blank'>Lihat Lampiran PDF</a>"
-            );
-        }
-    }).addTo(map);
-})
-.catch(err => console.log("Error loading GeoJSON:", err));
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        fetch("data/kkpr.json")
+        .then(response => response.json())
+        .then(data => {
+            console.log("🔍 Contoh satu fitur dari GeoJSON:", data.features[0].properties);
+
+            L.geoJSON(data, {
+                onEachFeature: function(feature, layer) {
+                    var props = feature.properties;
+                    var popupText = Object.entries(props)
+                        .map(([k,v]) => `<b>${k}</b>: ${v}`)
+                        .join("<br>");
+                    layer.bindPopup(popupText);
+                }
+            }).addTo(map);
+        })
+        .catch(err => console.log("Error loading GeoJSON:", err));
+    </script>
+</body>
+</html>
