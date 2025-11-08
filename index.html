@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Peta KKPR dengan Lampiran (Versi 2)</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100vh; width: 100%; }
+    .popup-link a {
+      color: #0078ff;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    .popup-link a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Inisialisasi peta
+    var map = L.map('map').setView([-6.9, 107.6], 8);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Load data GeoJSON dari file kkpr.json
+    fetch('kkpr.json')
+      .then(response => {
+        if (!response.ok) {
+          throw new Error("Gagal memuat kkpr.json");
+        }
+        return response.json();
+      })
+      .then(data => {
+        // Tambahkan layer GeoJSON
+        var kkprLayer = L.geoJSON(data, {
+          style: {
+            color: "blue",
+            weight: 2,
+            fillColor: "lightblue",
+            fillOpacity: 0.4
+          },
+          onEachFeature: function (feature, layer) {
+            var props = feature.properties || {};
+            var html = "<b>Informasi KKPR</b><br>";
+
+            // Tampilkan semua atribut
+            for (var key in props) {
+              html += key + ": " + props[key] + "<br>";
+            }
+
+            // Ambil kolom No_KKPR
+            var nomor = props.No_KKPR;
+            if (nomor) {
+              // Ubah karakter ilegal jadi underscore
+              var namaFile = nomor.replace(/[\/\\\s:]/g, "_") + ".pdf";
+              var pathFile = "attachments/" + namaFile;
+
+              html += `<div class="popup-link">
+                        📎 <a href="${pathFile}" target="_blank">Lihat Lampiran</a>
+                      </div>`;
+            }
+
+            layer.bindPopup(html);
+          }
+        }).addTo(map);
+
+        // Zoom otomatis sesuai batas data
+        map.fitBounds(kkprLayer.getBounds());
+      })
+      .catch(err => {
+        console.error(err);
+        alert("Terjadi kesalahan: " + err.message);
+      });
+  </script>
+</body>
+</html>
