@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Web GIS KKPR & RTRW</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin:0; padding:0; font-family:"Segoe UI", Arial, sans-serif; }
+    #map { height:100vh; width:100%; }
+
+    h2 { 
+      text-align:left;
+      position:absolute; 
+      top:10px; left:10px; 
+      background: rgba(255,255,255,0.8); 
+      padding:6px 14px; border-radius:10px; 
+      z-index:900; font-weight:bold;
+      box-shadow:0 2px 6px rgba(0,0,0,0.2);
+    }
+
+    .layer-toggle {
+      position:absolute; top:60px; left:10px; z-index:1000;
+      background: rgba(255,255,255,0.8); border-radius:10px;
+      padding:8px; cursor:pointer;
+      box-shadow:0 2px 6px rgba(0,0,0,0.2);
+      backdrop-filter: blur(6px); transition:background 0.3s;
+    }
+    .layer-toggle:hover { background: rgba(255,255,255,0.9); }
+
+    .layer-icon { width:20px; height:16px; position:relative; }
+    .layer-icon div { width:100%; height:4px; background:#d00; position:absolute; transform:skewX(-25deg); border-radius:2px; }
+    .layer-icon div:nth-child(1){top:0;} .layer-icon div:nth-child(2){top:6px;} .layer-icon div:nth-child(3){top:12px;}
+
+    .layer-panel {
+      position:absolute; top:100px; left:10px; z-index:999;
+      background: rgba(255,255,255,0.15); backdrop-filter:blur(10px);
+      border-radius:12px; padding:10px 15px;
+      box-shadow:0 4px 15px rgba(0,0,0,0.3);
+      color:white; width:220px; font-size:14px;
+      opacity:0; transform:translateY(-10px); pointer-events:none;
+      transition: all 0.4s ease;
+    }
+    .layer-panel.show { opacity:1; transform:translateY(0); pointer-events:auto; }
+    .layer-panel label { display:block; margin-bottom:8px; cursor:pointer; }
+    .layer-panel input { margin-right:6px; }
+    .transparency-slider { width:100%; }
+  </style>
+</head>
+<body>
+<h2>Web GIS KKPR & RTRW</h2>
+<div id="map"></div>
+
+<!-- Tombol toggle -->
+<div class="layer-toggle" id="layerToggle">
+  <div class="layer-icon"><div></div><div></div><div></div></div>
+</div>
+
+<!-- Panel filter -->
+<div class="layer-panel" id="layerPanel">
+  <label><input type="checkbox" id="osmLayer" checked> Basemap: OpenStreetMap</label>
+  <label><input type="checkbox" id="satLayer" checked> Basemap: Satelit</label>
+  <label><input type="checkbox" id="kkprLayer" checked> Layer KKPR</label>
+  <hr>
+  <div id="rtrwCheckboxes"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map').setView([-6.9, 107.6], 9);
+
+// Basemap
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'&copy; OSM contributors' }).addTo(map);
+const satelit = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'&copy; Esri, Maxar' }).addTo(map);
+
+// KKPR Layer
+const kkprLayer = L.layerGroup().addTo(map);
+
+// Highlight state
+let lastHighlighted = null;
+
+// Load KKPR
+fetch("data/kkpr.json").then(res=>res.json()).then(data=>{
+  const geo = L.geoJSON(data, {
+    style: {color:"red", weight:2, fillOpacity:0},
+    onEachFeature: (feature, layer)=>{
+      const p = feature.properties;
+      const nomor = p.No_KKPR || "-";
+      const luas = p.Luas_KKPR ? `${p.Luas_KKPR} m²` : "-";
+      const popupContent = `<table style="border-collapse:collapse;width:100%;font-size:13px;">
+        <tr><td>Nomor KKPR</td><td>${p.No_KKPR || "-"}</td></tr>
+        <tr><td>Nama Pemohon</td><td>${p.Nama_Usaha || "-"}</td></tr>
+        <tr><td>Kode KBLI</td><td>${p.KO_KBLI || "-"}</td></tr>
+        <tr><td>Alamat</td><td>${p.Alamat || "-"}</td></tr>
+        <tr><td>Desa/Kelurahan</td><td>${p.Desa_Kel || "-"}</td></tr>
+        <tr><td>Kecamatan</td><td>${p.Kec || "-"}</td></tr>
+        <tr><td>Kota/Kabupaten</td><td>${p.KoKab || "-"}</td></tr>
+        <tr><td>Jenis KKPR yang Diterbitkan</td><td>${p.Jns_KKPR || "-"}</td></tr>
+        <tr><td>Penerbit KKPR</td><td>${p.Penerbit || "-"}</td></tr>
+        <tr><td>Tanggal Terbit Dokumen KKPR</td><td>${p.Tagl_Terbi || "-"}</td></tr>
+        <tr><td>Dasar Pertimbangan Penerbitan KKPR</td><td>${p.Ket_KKPR || "-"}</td></tr>
+        <tr><td>Luas KKPR berdasarkan Dokumen</td><td>${luas}</td></tr>
+      </table>`;
+      layer.bindPopup(popupContent);
+      layer.on('click', ()=>{
+        if(lastHighlighted) lastHighlighted.setStyle({fillColor:null});
+        layer.setStyle({color:"yellow", fillOpacity:0.3});
+        lastHighlighted = layer;
+        layer.openPopup();
+      });
+    }
+  }).addTo(kkprLayer);
+});
+
+// RTRW Layers
+const rtrwLayers = {};  // key = category
+const rtrwColors = {
+  "Badan Air":"#2365A8",
+  "Kawasan Hutan Produksi":"#2E8B57",
+  "Kawasan Konservasi":"#8B0000",
+  "Kawasan Perikanan":"#FF8C00",
+  "Kawasan Perlindungan Setempat":"#6A5ACD",
+  "Kawasan Permukiman":"#FFD700",
+  "Kawasan Cagar Budaya":"#CD5C5C",
+  "Kawasan Hutan Adat":"#228B22",
+  "Kawasan Lindung Geologi":"#A0522D",
+  "Kawasan Pariwisata":"#FF69B4",
+  "Kawasan Pembuangan Hasil Pengerukan di Laut":"#00CED1",
+  "Kawasan Pencadangan Konservasi di Laut":"#20B2AA",
+  "Kawasan Pergaraman":"#DAA520",
+  "Kawasan Pertahanan dan Keamanan":"#B22222",
+  "Kawasan Pertambangan dan Energi":"#8B4513"
+};
+
+// Helper load JSONs
+function loadRTRW(name, path){
+  fetch(path).then(res=>res.json()).then(data=>{
+    const layer = L.layerGroup();
+    L.geoJSON(data, {
+      style: {fillColor:rtrwColors[name] || "#888", weight:1, color:"#000", fillOpacity:0.6},
+      onEachFeature:(feature, layerGeo)=>{
+        layerGeo.bindPopup(`<b>${name}</b>`);
+      }
+    }).addTo(layer);
+    rtrwLayers[name] = layer;
+    // Add checkbox
+    const div = document.getElementById("rtrwCheckboxes");
+    const label = document.createElement("label");
+    label.innerHTML = `<input type="checkbox" checked data-name="${name}"> ${name}
+      <input type="range" min="0" max="1" step="0.05" value="0.6" class="transparency-slider" data-name="${name}">`;
+    div.appendChild(label);
+    const checkbox = label.querySelector("input[type=checkbox]");
+    const slider = label.querySelector("input[type=range]");
+    checkbox.addEventListener("change", e=>{
+      e.target.checked ? map.addLayer(rtrwLayers[name]) : map.removeLayer(rtrwLayers[name]);
+    });
+    slider.addEventListener("input", e=>{
+      const opacity = parseFloat(e.target.value);
+      rtrwLayers[name].eachLayer(l=>l.setStyle({fillOpacity:opacity}));
+    });
+    layer.addTo(map);
+  });
+}
+
+// Load all RTRW categories
+const rtrwFiles = {
+  "Badan Air":"data/Badan Air/Badan_Air_part1.json",
+  "Kawasan Hutan Produksi":"data/Kawasan Hutan Produksi/Kawasan_Hutan_Produksi_part1.json",
+  "Kawasan Konservasi":"data/Kawasan Konservasi/Kawasan_Konservasi_part1.json",
+  "Kawasan Perikanan":"data/Kawasan Perikanan/Kawasan_Perikanan_part1.json",
+  "Kawasan Perlindungan Setempat":"data/Kawasan Perlindungan Setempat/Kawasan_Perlindungan_Setempat_part1.json",
+  "Kawasan Permukiman":"data/Kawasan Permukiman/Kawasan_Permukiman_part1.json",
+  "Kawasan Cagar Budaya":"data/Kawasan Cagar Budaya.json",
+  "Kawasan Hutan Adat":"data/Kawasan Hutan Adat.json",
+  "Kawasan Lindung Geologi":"data/Kawasan Lindung Geologi.json",
+  "Kawasan Pariwisata":"data/Kawasan Pariwisata.json",
+  "Kawasan Pembuangan Hasil Pengerukan di Laut":"data/Kawasan Pembuangan Hasil Pengerukan di Laut.json",
+  "Kawasan Pencadangan Konservasi di Laut":"data/Kawasan Pencadangan Konservasi di Laut.json",
+  "Kawasan Pergaraman":"data/Kawasan Pergaraman.json",
+  "Kawasan Pertahanan dan Keamanan":"data/Kawasan Pertahanan dan Keamanan.json",
+  "Kawasan Pertambangan dan Energi":"data/Kawasan Pertambangan dan Energi.json"
+};
+
+for(let cat in rtrwFiles){
+  loadRTRW(cat, rtrwFiles[cat]);
+}
+
+// Toggle panel
+const toggleBtn = document.getElementById('layerToggle');
+const panel = document.getElementById('layerPanel');
+toggleBtn.addEventListener('click', ()=>{panel.classList.toggle('show');});
+
+// Basemap toggle
+document.getElementById('osmLayer').addEventListener('change', e=>{ e.target.checked ? map.addLayer(osm) : map.removeLayer(osm); });
+document.getElementById('satLayer').addEventListener('change', e=>{ e.target.checked ? map.addLayer(satelit) : map.removeLayer(satelit); });
+document.getElementById('kkprLayer').addEventListener('change', e=>{ e.target.checked ? map.addLayer(kkprLayer) : map.removeLayer(kkprLayer); });
+</script>
+</body>
+</html>
