@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Web GIS KKPR & RTRW</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin:0; padding:0; font-family:"Segoe UI", Arial, sans-serif; }
+    #map { height:100vh; width:100%; }
+    h2 { position:absolute; top:10px; left:15px; background:rgba(255,255,255,0.8); padding:6px 14px; border-radius:10px; z-index:900; font-weight:bold; }
+    
+    .layer-toggle { position:absolute; top:70px; left:15px; z-index:1000; background:rgba(255,255,255,0.8); border-radius:10px; padding:8px; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.2); backdrop-filter: blur(6px); }
+    .layer-toggle:hover { background: rgba(255,255,255,0.9);}
+    .layer-icon { width:20px; height:16px; position:relative; }
+    .layer-icon div { width:100%; height:4px; background:#d00; position:absolute; transform: skewX(-25deg); border-radius:2px; }
+    .layer-icon div:nth-child(1) { top:0; }
+    .layer-icon div:nth-child(2) { top:6px; }
+    .layer-icon div:nth-child(3) { top:12px; }
+
+    .layer-panel { position:absolute; top:110px; left:15px; z-index:999; background:rgba(255,255,255,0.15); backdrop-filter: blur(10px); border-radius:12px; padding:10px 15px; box-shadow:0 4px 15px rgba(0,0,0,0.3); color:white; width:250px; font-size:14px; opacity:0; transform:translateY(-10px); pointer-events:none; transition: all 0.4s ease; }
+    .layer-panel.show { opacity:1; transform:translateY(0); pointer-events:auto; }
+    .layer-panel label { display:block; margin-bottom:8px; cursor:pointer; }
+    .layer-panel input { margin-right:6px; }
+    .transparency-control { margin-top:5px; font-size:12px; }
+  </style>
+</head>
+<body>
+  <h2>Web GIS KKPR & RTRW</h2>
+  <div id="map"></div>
+
+  <div class="layer-toggle" id="layerToggle">
+    <div class="layer-icon"><div></div><div></div><div></div></div>
+  </div>
+
+  <div class="layer-panel" id="layerPanel">
+    <label><input type="checkbox" id="osmLayer" checked> Basemap: OpenStreetMap</label>
+    <label><input type="checkbox" id="satLayer" checked> Basemap: Citra Satelit</label>
+    <label><input type="checkbox" id="kkprLayer" checked> Layer KKPR</label>
+    <hr>
+    <label><input type="checkbox" id="rtrwPerlindungan" checked> RTRW: Kawasan Perlindungan</label>
+    <input type="range" id="rtrwPerlindunganOpacity" min="0" max="1" step="0.05" value="1" class="transparency-control">
+    <label><input type="checkbox" id="rtrwTransportasi" checked> RTRW: Kawasan Transportasi</label>
+    <input type="range" id="rtrwTransportasiOpacity" min="0" max="1" step="0.05" value="1" class="transparency-control">
+    <label><input type="checkbox" id="rtrwIndustri" checked> RTRW: Kawasan Industri</label>
+    <input type="range" id="rtrwIndustriOpacity" min="0" max="1" step="0.05" value="1" class="transparency-control">
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([-6.9, 107.6], 9);
+
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'&copy; OpenStreetMap contributors' }).addTo(map);
+    const satelit = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'&copy; Esri, Maxar, Earthstar Geographics' }).addTo(map);
+
+    const kkprLayer = L.layerGroup().addTo(map);
+    let allKKPR = [];
+    let currentHighlight = null;
+
+    const rtrwLayers = {};
+
+    // Fungsi buat load RTRW layer
+    function loadRTRW(name, file, color){
+      fetch("data/" + file).then(r=>r.json()).then(data=>{
+        const layer = L.geoJSON(data, {
+          style: { color: color, fillColor: color, fillOpacity:1, weight:0 }
+        }).addTo(map);
+        rtrwLayers[name] = layer;
+      });
+    }
+
+    loadRTRW("Perlindungan","Kawasan yang Memberikan Perlindungan terhadap Kawasan Bawahannya.json","rgb(35,65,40)");
+    loadRTRW("Transportasi","Kawasan Transportasi.json","rgb(215,55,0)");
+    loadRTRW("Industri","Kawasan Peruntukan Industri.json","rgb(105,0,0)");
+
+    // Load KKPR
+    fetch("data/kkpr.json")
+      .then(res=>res.json())
+      .then(data=>{
+        L.geoJSON(data, {
+          style: { color:"red", weight:2, fillOpacity:0 },
+          onEachFeature: function(feature, layer){
+            layer.kkprData = feature.properties;
+            allKKPR.push(layer);
+          }
+        }).addTo(kkprLayer);
+      });
+
+    const toggleBtn = document.getElementById('layerToggle');
+    const panel = document.getElementById('layerPanel');
+    toggleBtn.addEventListener('click', ()=>panel.classList.toggle('show'));
+
+    // Checkbox basemap & KKPR
+    document.getElementById('osmLayer').addEventListener('change', e => e.target.checked ? map.addLayer(osm) : map.removeLayer(osm));
+    document.getElementById('satLayer').addEventListener('change', e => e.target.checked ? map.addLayer(satelit) : map.removeLayer(satelit));
+    document.getElementById('kkprLayer').addEventListener('change', e => e.target.checked ? map.addLayer(kkprLayer) : map.removeLayer(kkprLayer));
+
+    // Checkbox RTRW
+    document.getElementById('rtrwPerlindungan').addEventListener('change', e => {
+      e.target.checked ? map.addLayer(rtrwLayers["Perlindungan"]) : map.removeLayer(rtrwLayers["Perlindungan"]);
+    });
+    document.getElementById('rtrwTransportasi').addEventListener('change', e => {
+      e.target.checked ? map.addLayer(rtrwLayers["Transportasi"]) : map.removeLayer(rtrwLayers["Transportasi"]);
+    });
+    document.getElementById('rtrwIndustri').addEventListener('change', e => {
+      e.target.checked ? map.addLayer(rtrwLayers["Industri"]) : map.removeLayer(rtrwLayers["Industri"]);
+    });
+
+    // Slider transparansi
+    document.getElementById('rtrwPerlindunganOpacity').addEventListener('input', e=>{
+      rtrwLayers["Perlindungan"].setStyle({fillOpacity:e.target.value});
+    });
+    document.getElementById('rtrwTransportasiOpacity').addEventListener('input', e=>{
+      rtrwLayers["Transportasi"].setStyle({fillOpacity:e.target.value});
+    });
+    document.getElementById('rtrwIndustriOpacity').addEventListener('input', e=>{
+      rtrwLayers["Industri"].setStyle({fillOpacity:e.target.value});
+    });
+
+    // Klik lokasi KKPR
+    map.on('click', function(e){
+      const latlng = e.latlng;
+      const hits = allKKPR.filter(layer=>layer.getBounds().contains(latlng));
+      if(hits.length === 0) return;
+
+      let popupHtml = "<b>Daftar KKPR di lokasi ini:</b><br><ul>";
+      hits.forEach((layer,i)=>{
+        popupHtml += `<li><a href="#" onclick="selectKKPR(${i});return false;">${layer.kkprData.No_KKPR}</a></li>`;
+      });
+      popupHtml += "</ul>";
+      L.popup().setLatLng(latlng).setContent(popupHtml).openOn(map);
+
+      window.selectKKPR = function(index){
+        const layer = hits[index];
+        if(currentHighlight) currentHighlight.setStyle({ color:"red" });
+        layer.setStyle({ color:"yellow" });
+        currentHighlight = layer;
+        layer.bringToFront();
+        map.fitBounds(layer.getBounds());
+        const p = layer.kkprData;
+        const luasFormatted = p.Luas_KKPR ? `${p.Luas_KKPR} m²` : "-";
+        const popupContent = `
+          <table style="border-collapse:collapse;width:100%;font-size:13px;">
+            <tr><td>Nomor KKPR</td><td>${p.No_KKPR || "-"}</td></tr>
+            <tr><td>Nama Pemohon</td><td>${p.Nama_Usaha || "-"}</td></tr>
+            <tr><td>Kode KBLI</td><td>${p.KO_KBLI || "-"}</td></tr>
+            <tr><td>Alamat</td><td>${p.Alamat || "-"}</td></tr>
+            <tr><td>Desa/Kelurahan</td><td>${p.Desa_Kel || "-"}</td></tr>
+            <tr><td>Kecamatan</td><td>${p.Kec || "-"}</td></tr>
+            <tr><td>Kota/Kabupaten</td><td>${p.KoKab || "-"}</td></tr>
+            <tr><td>Jenis KKPR yang Diterbitkan</td><td>${p.Jns_KKPR || "-"}</td></tr>
+            <tr><td>Penerbit KKPR</td><td>${p.Penerbit || "-"}</td></tr>
+            <tr><td>Tanggal Terbit Dokumen KKPR</td><td>${p.Tagl_Terbi || "-"}</td></tr>
+            <tr><td>Dasar Pertimbangan Penerbitan KKPR</td><td>${p.Ket_KKPR || "-"}</td></tr>
+            <tr><td>Luas KKPR berdasarkan Dokumen</td><td>${luasFormatted}</td></tr>
+            <tr><td colspan="2" style="text-align:center;padding-top:6px;">
+              <a href="lampiran/${p.No_KKPR}.pdf" target="_blank">📄 Lihat Lampiran PDF</a>
+            </td></tr>
+          </table>
+        `;
+        L.popup().setLatLng(layer.getBounds().getCenter()).setContent(popupContent).openOn(map);
+      };
+    });
+
+  </script>
+</body>
+</html>
