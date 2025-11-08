@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Web GIS KKPR + RTRW</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  body { margin:0; padding:0; font-family:"Segoe UI", Arial, sans-serif; }
+  #map { height:100vh; width:100%; }
+  h2 { position:absolute; top:10px; left:10px; background:rgba(255,255,255,0.8); padding:6px 12px; border-radius:8px; z-index:900; font-weight:bold; }
+  .layer-panel { position:absolute; top:50px; left:10px; z-index:999; background:rgba(255,255,255,0.85); border-radius:10px; padding:10px; box-shadow:0 2px 6px rgba(0,0,0,0.3); max-height:90vh; overflow-y:auto;}
+  .layer-panel label { display:block; margin-bottom:6px; cursor:pointer; }
+  .layer-panel input { margin-right:6px; }
+  .slider-container { display:flex; align-items:center; margin-bottom:6px; }
+  .slider-container input[type=range]{ flex:1; }
+  .slider-container span{ width:30px; text-align:right; margin-left:6px; }
+</style>
+</head>
+<body>
+<h2>Web GIS KKPR + RTRW</h2>
+<div id="map"></div>
+
+<div class="layer-panel" id="layerPanel">
+  <label><input type="checkbox" id="osmLayer" checked> Basemap: OpenStreetMap</label>
+  <label><input type="checkbox" id="satLayer" checked> Basemap: Citra Satelit</label>
+  <label><input type="checkbox" id="kkprLayer" checked> Layer KKPR</label>
+  <div id="rtrwLayersCheckbox"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map').setView([-6.9, 107.6], 9);
+
+// Basemap
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'&copy; OSM'}).addTo(map);
+const satelit = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{ attribution:'&copy; Esri, Maxar'}).addTo(map);
+
+// Layer KKPR
+const kkprLayer = L.layerGroup().addTo(map);
+fetch("data/KKPR.json").then(res=>res.json()).then(data=>{
+  L.geoJSON(data, {
+    style:{ color:"red", weight:2, fillOpacity:0 },
+    onEachFeature:function(feature,layer){
+      const p=feature.properties;
+      const luasFormatted = p.Luas_KKPR ? `${p.Luas_KKPR} m²` : "-";
+      const popupContent = `
+        <table style="border-collapse:collapse;width:100%;font-size:13px;">
+          <tr><td>Nomor KKPR</td><td>${p.No_KKPR || "-"}</td></tr>
+          <tr><td>Nama Pemohon</td><td>${p.Nama_Usaha || "-"}</td></tr>
+          <tr><td>Kode KBLI</td><td>${p.KO_KBLI || "-"}</td></tr>
+          <tr><td>Alamat</td><td>${p.Alamat || "-"}</td></tr>
+          <tr><td>Desa/Kelurahan</td><td>${p.Desa_Kel || "-"}</td></tr>
+          <tr><td>Kecamatan</td><td>${p.Kec || "-"}</td></tr>
+          <tr><td>Kota/Kabupaten</td><td>${p.KoKab || "-"}</td></tr>
+          <tr><td>Jenis KKPR</td><td>${p.Jns_KKPR || "-"}</td></tr>
+          <tr><td>Penerbit</td><td>${p.Penerbit || "-"}</td></tr>
+          <tr><td>Tanggal Terbit</td><td>${p.Tagl_Terbi || "-"}</td></tr>
+          <tr><td>Dasar Pertimbangan</td><td>${p.Ket_KKPR || "-"}</td></tr>
+          <tr><td>Luas</td><td>${luasFormatted}</td></tr>
+        </table>`;
+      layer.bindPopup(popupContent);
+      layer.on('click',function(){ this.setStyle({color:"yellow"}); this.bringToFront(); });
+    }
+  }).addTo(kkprLayer);
+});
+
+// Fungsi random warna sementara
+function randomColor(seed){ 
+  const colors=["#4CAF50","#FF9800","#2196F3","#9C27B0","#FF5722","#607D8B","#795548","#3F51B5"];
+  return colors[seed % colors.length];
+}
+
+// Load semua file GeoJSON RTRW dari folder & subfolder
+const rtrwCategories = [
+  "Badan Air","Kawasan Hutan Produksi","Kawasan Konservasi","Kawasan Perikanan",
+  "Kawasan Perlindungan Setempat","Kawasan Permukiman"
+];
+const rtrwLayers = {};
+const rtrwLayersCheckboxDiv = document.getElementById("rtrwLayersCheckbox");
+
+rtrwCategories.forEach((cat,i)=>{
+  rtrwLayers[cat] = L.layerGroup().addTo(map);
+  for(let j=1;j<=1000;j++){
+    const fileName = `data/${cat}/${cat.replace(/\s/g,"_")}_part${j}.json`;
+    fetch(fileName).then(res=>{ if(res.ok) return res.json(); })
+    .then(data=>{
+      if(data){
+        L.geoJSON(data,{
+          style:{ fillColor: randomColor(i), fillOpacity:0.5, color:null },
+        }).addTo(rtrwLayers[cat]);
+      }
+    }).catch(e=>{});
+  }
+
+  // Buat checkbox + slider transparansi per kategori
+  const container = document.createElement("div");
+  const label = document.createElement("label");
+  label.innerText = cat;
+  const sliderDiv = document.createElement("div");
+  sliderDiv.className = "slider-container";
+  sliderDiv.innerHTML = `<input type="range" min="0" max="100" value="50" data-cat="${cat}"><span>50%</span>`;
+  container.appendChild(label);
+  container.appendChild(sliderDiv);
+  rtrwLayersCheckboxDiv.appendChild(container);
+});
+
+// Event checkbox dan slider
+rtrwLayersCheckboxDiv.addEventListener("input", e=>{
+  if(e.target.tagName==="INPUT" && e.target.type==="range"){
+    const cat = e.target.dataset.cat;
+    const val = e.target.value/100;
+    rtrwLayers[cat].eachLayer(l=>{ l.setStyle({ fillOpacity: val }); });
+    e.target.nextElementSibling.innerText = `${e.target.value}%`;
+  }
+});
+
+rtrwLayersCheckboxDiv.addEventListener("change", e=>{
+  if(e.target.tagName==="INPUT" && e.target.type==="checkbox"){
+    const cat = e.target.dataset.cat;
+    e.target.checked ? rtrwLayers[cat].addTo(map) : map.removeLayer(rtrwLayers[cat]);
+  }
+});
+
+// Checkbox basemap & KKPR
+document.getElementById('osmLayer').addEventListener('change', e => e.target.checked ? map.addLayer(osm) : map.removeLayer(osm));
+document.getElementById('satLayer').addEventListener('change', e => e.target.checked ? map.addLayer(satelit) : map.removeLayer(satelit));
+document.getElementById('kkprLayer').addEventListener('change', e => e.target.checked ? map.addLayer(kkprLayer) : map.removeLayer(kkprLayer));
+
+</script>
+</body>
+</html>
