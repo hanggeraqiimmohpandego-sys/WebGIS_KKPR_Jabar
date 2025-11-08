@@ -1,0 +1,23 @@
+fetch("data/kkpr.json")
+  .then(response => response.json())
+  .then(data => {
+    L.geoJSON(data, {
+      onEachFeature: function(feature, layer) {
+        // Ambil nomor KKPR dari properti GeoJSON
+        var nomor = feature.properties["No_KKPR"];
+        if (!nomor) {
+          nomor = "No_KKPR"; // fallback kalau kolom tidak ada
+        }
+
+        // Path ke file PDF
+        var pdfLink = "./lampiran/" + nomor + ".pdf";
+
+        // Tampilkan popup dengan link HTML yang valid
+        layer.bindPopup(
+          "<b>Nomor KKPR:</b> " + nomor +
+          "<br><a href='" + pdfLink + "' target='_blank'>📄 Lihat Lampiran PDF</a>"
+        );
+      }
+    }).addTo(map);
+  })
+  .catch(err => console.log("Error loading GeoJSON:", err));
