@@ -3,24 +3,32 @@
 <head>
     <meta charset="utf-8" />
     <title>Web GIS KKPR</title>
+    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin:0; padding:0; font-family: Arial, sans-serif; }
         #map { height: 90vh; width: 100%; }
         h2 { text-align: center; margin: 10px 0; }
+        .leaflet-popup-content b { color: #2c3e50; }
     </style>
 </head>
 <body>
     <h2>Web GIS KKPR</h2>
     <div id="map"></div>
 
+    <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <script>
-        var map = L.map('map').setView([-6.9, 107.6], 10);
+        // 1. Buat map
+        var map = L.map('map').setView([-6.9, 107.6], 9);
+
+        // 2. Tambahkan base map OSM
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
+        // 3. Load GeoJSON
         fetch("data/kkpr.json")
         .then(response => response.json())
         .then(data => {
@@ -28,13 +36,14 @@
                 onEachFeature: function(feature, layer) {
                     var p = feature.properties;
 
-                    // Coba cari field nomor KKPR secara otomatis
-                    var nomor = p.No_KKPR || p.NOMOR || p.NoKKPR || p.Nomor_KKPR || p["No. KKPR"] || "-";
-                    var cleanNomor = nomor.trim().replace(/\s+/g, "_");
+                    // ambil nomor KKPR dari kolom yg benar
+                    var nomor = (p.No_KKPR || "-").toString().trim();
+                    var cleanNomor = nomor.replace(/\s+/g, "_");
                     var pdfLink = "lampiran/" + cleanNomor + ".pdf";
 
+                    // isi popup
                     var popupContent = `
-                        <b>Nomor KKPR:</b> ${nomor}<br>
+                        <b>Nomor KKPR:</b> ${p.No_KKPR || "-"}<br>
                         <b>Nama Pemohon:</b> ${p.Nama_Usaha || "-"}<br>
                         <b>Kode KBLI:</b> ${p.KO_KBLI || "-"}<br>
                         <b>Alamat:</b> ${p.Alamat || "-"}<br>
@@ -50,6 +59,11 @@
                     `;
 
                     layer.bindPopup(popupContent);
+                },
+                style: {
+                    color: "#0074D9",
+                    weight: 2,
+                    fillOpacity: 0.3
                 }
             }).addTo(map);
         })
