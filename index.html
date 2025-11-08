@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Web GIS KKPR & RTRW</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin:0; padding:0; font-family: "Segoe UI", Arial, sans-serif;}
+    #map { height:100vh; width:100%; }
+    h2 { 
+      position:absolute; top:10px; left:15px; z-index:1000; 
+      background: rgba(255,255,255,0.8); padding:6px 12px; border-radius:8px;
+    }
+
+    .layer-panel {
+      position:absolute; top:50px; left:15px; z-index:1000;
+      background: rgba(255,255,255,0.85); padding:10px 12px; border-radius:8px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.3);
+    }
+    .layer-panel label { display:block; margin-bottom:5px; cursor:pointer; }
+    .layer-panel input[type=range] { width:100%; }
+
+    .popup-table { border-collapse:collapse; width:100%; font-size:13px; }
+    .popup-table td { padding:3px 5px; vertical-align:top; }
+  </style>
+</head>
+<body>
+  <h2>Web GIS KKPR & RTRW</h2>
+  <div id="map"></div>
+
+  <div class="layer-panel" id="layerPanel">
+    <b>Basemap:</b>
+    <label><input type="checkbox" id="osmLayer" checked> OpenStreetMap</label>
+    <label><input type="checkbox" id="satLayer" checked> Satelit</label>
+    <hr>
+    <b>Layer KKPR:</b>
+    <label><input type="checkbox" id="kkprLayer" checked> KKPR</label>
+    <hr>
+    <b>Layer RTRW:</b>
+    <label><input type="checkbox" id="rtrwBA" checked> Badan Air</label>
+    <label>Transparansi: <input type="range" id="transBA" min="0" max="1" step="0.05" value="0.5"></label>
+    <label><input type="checkbox" id="rtrwKHP" checked> Kawasan Hutan Produksi</label>
+    <label>Transparansi: <input type="range" id="transKHP" min="0" max="1" step="0.05" value="0.5"></label>
+    <label><input type="checkbox" id="rtrwKK" checked> Kawasan Konservasi</label>
+    <label>Transparansi: <input type="range" id="transKK" min="0" max="1" step="0.05" value="0.5"></label>
+    <label><input type="checkbox" id="rtrwKP" checked> Kawasan Perikanan</label>
+    <label>Transparansi: <input type="range" id="transKP" min="0" max="1" step="0.05" value="0.5"></label>
+    <label><input type="checkbox" id="rtrwKPS" checked> Kawasan Perlindungan Setempat</label>
+    <label>Transparansi: <input type="range" id="transKPS" min="0" max="1" step="0.05" value="0.5"></label>
+    <label><input type="checkbox" id="rtrwKPerm" checked> Kawasan Permukiman</label>
+    <label>Transparansi: <input type="range" id="transKPerm" min="0" max="1" step="0.05" value="0.5"></label>
+    <hr>
+    <b>Layer RTRW Lain:</b>
+    <label><input type="checkbox" id="rtrwCCB" checked> Kawasan Cagar Budaya</label>
+    <label><input type="checkbox" id="rtrwHAdat" checked> Kawasan Hutan Adat</label>
+    <label><input type="checkbox" id="rtrwLG" checked> Kawasan Lindung Geologi</label>
+    <label><input type="checkbox" id="rtrwPariwisata" checked> Kawasan Pariwisata</label>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([-6.9, 107.6], 9);
+
+    // Basemap
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'&copy; OSM'}).addTo(map);
+    const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'&copy; Esri, Maxar'}).addTo(map);
+
+    // --- Layer KKPR ---
+    const kkprLayer = L.layerGroup().addTo(map);
+    let kkprData = {}; // akan menampung polygon KKPR
+    fetch("data/kkpr.json").then(r=>r.json()).then(data=>{
+      L.geoJSON(data,{
+        style:{color:"red", weight:2, fillOpacity:0},
+        onEachFeature:(f,l)=>{
+          const p = f.properties;
+          const pdfLink = "lampiran/"+(p.No_KKPR||"-")+".pdf";
+          const luasFormatted = p.Luas_KKPR ? `${p.Luas_KKPR} m²` : "-";
+          l.bindPopup(`
+            <table class="popup-table">
+              <tr><td>Nomor KKPR</td><td>${p.No_KKPR||"-"}</td></tr>
+              <tr><td>Nama Pemohon</td><td>${p.Nama_Usaha||"-"}</td></tr>
+              <tr><td>Kode KBLI</td><td>${p.KO_KBLI||"-"}</td></tr>
+              <tr><td>Alamat</td><td>${p.Alamat||"-"}</td></tr>
+              <tr><td>Desa/Kelurahan</td><td>${p.Desa_Kel||"-"}</td></tr>
+              <tr><td>Kecamatan</td><td>${p.Kec||"-"}</td></tr>
+              <tr><td>Kota/Kabupaten</td><td>${p.KoKab||"-"}</td></tr>
+              <tr><td>Jenis KKPR yang Diterbitkan</td><td>${p.Jns_KKPR||"-"}</td></tr>
+              <tr><td>Penerbit KKPR</td><td>${p.Penerbit||"-"}</td></tr>
+              <tr><td>Tanggal Terbit Dokumen KKPR</td><td>${p.Tagl_Terbi||"-"}</td></tr>
+              <tr><td>Dasar Pertimbangan Penerbitan KKPR</td><td>${p.Ket_KKPR||"-"}</td></tr>
+              <tr><td>Luas KKPR berdasarkan Dokumen</td><td>${luasFormatted}</td></tr>
+              <tr><td colspan="2" style="text-align:center"><a href="${pdfLink}" target="_blank">📄 Lihat Lampiran PDF</a></td></tr>
+            </table>
+          `);
+          kkprData[p.No_KKPR] = l;
+        }
+      }).addTo(kkprLayer);
+    });
+
+    // --- Layer RTRW ---
+    const rtrwLayers = {};
+    const rtrwFiles = {
+      "rtrwBA":["data/Badan Air/Badan_Air_part1.json"], // contoh, ganti semua part
+      "rtrwKHP":["data/Kawasan Hutan Produksi/Kawasan_Hutan_Produksi_part1.json"],
+      "rtrwKK":["data/Kawasan Konservasi/Kawasan_Konservasi_part1.json"],
+      "rtrwKP":["data/Kawasan Perikanan/Kawasan_Perikanan_part1.json"],
+      "rtrwKPS":["data/Kawasan Perlindungan Setempat/Kawasan_Perlindungan_Setempat_part1.json"],
+      "rtrwKPerm":["data/Kawasan Permukiman/Kawasan_Permukiman_part1.json"],
+      "rtrwCCB":["data/Kawasan Cagar Budaya.json"],
+      "rtrwHAdat":["data/Kawasan Hutan Adat.json"],
+      "rtrwLG":["data/Kawasan Lindung Geologi.json"],
+      "rtrwPariwisata":["data/Kawasan Pariwisata.json"]
+    };
+
+    function loadRTRW(key, file, color){
+      const layer = L.layerGroup();
+      fetch(file).then(r=>r.json()).then(data=>{
+        L.geoJSON(data,{
+          style:{color:color, fillOpacity:0.5},
+        }).addTo(layer);
+      });
+      rtrwLayers[key] = layer.addTo(map);
+    }
+
+    // Load semua RTRW dengan warna berbeda
+    loadRTRW("rtrwBA","data/Badan Air/Badan_Air_part1.json","#237F28");
+    loadRTRW("rtrwKHP","data/Kawasan Hutan Produksi/Kawasan_Hutan_Produksi_part1.json","#558B2F");
+    loadRTRW("rtrwKK","data/Kawasan Konservasi/Kawasan_Konservasi_part1.json","#4CAF50");
+    loadRTRW("rtrwKP","data/Kawasan Perikanan/Kawasan_Perikanan_part1.json","#1E88E5");
+    loadRTRW("rtrwKPS","data/Kawasan Perlindungan Setempat/Kawasan_Perlindungan_Setempat_part1.json","#8E24AA");
+    loadRTRW("rtrwKPerm","data/Kawasan Permukiman/Kawasan_Permukiman_part1.json","#FF9800");
+    loadRTRW("rtrwCCB","data/Kawasan Cagar Budaya.json","#795548");
+    loadRTRW("rtrwHAdat","data/Kawasan Hutan Adat.json","#009688");
+    loadRTRW("rtrwLG","data/Kawasan Lindung Geologi.json","#9E9E9E");
+    loadRTRW("rtrwPariwisata","data/Kawasan Pariwisata.json","#FF5722");
+
+    // --- Checkbox & slider RTRW ---
+    Object.keys(rtrwLayers).forEach(k=>{
+      document.getElementById(k).addEventListener('change', e=>{
+        e.target.checked ? map.addLayer(rtrwLayers[k]) : map.removeLayer(rtrwLayers[k]);
+      });
+      const slider = document.getElementById('trans'+k.substring(4));
+      if(slider){
+        slider.addEventListener('input', e=>{
+          rtrwLayers[k].eachLayer(l=>{ 
+            l.setStyle({fillOpacity: parseFloat(e.target.value)});
+          });
+        });
+      }
+    });
+
+    // Checkbox basemap & KKPR
+    document.getElementById('osmLayer').addEventListener('change', e=> e.target.checked? map.addLayer(osm):map.removeLayer(osm));
+    document.getElementById('satLayer').addEventListener('change', e=> e.target.checked? map.addLayer(sat):map.removeLayer(sat));
+    document.getElementById('kkprLayer').addEventListener('change', e=> e.target.checked? map.addLayer(kkprLayer):map.removeLayer(kkprLayer));
+
+  </script>
+</body>
+</html>
