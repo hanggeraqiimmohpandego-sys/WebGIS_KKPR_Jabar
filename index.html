@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Web GIS KKPR & RTRW</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin:0; padding:0; font-family: "Segoe UI", Arial, sans-serif; }
+    #map { height: 100vh; width: 100%; }
+
+    /* Judul di pojok kiri atas */
+    h2 {
+      position: absolute;
+      top: 10px;
+      left: 15px;
+      background: rgba(255,255,255,0.8);
+      padding: 6px 14px;
+      border-radius: 10px;
+      z-index: 1001;
+      font-weight: bold;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    }
+
+    /* Panel layer dan slider */
+    .layer-panel {
+      position: absolute;
+      top: 60px;
+      left: 15px;
+      z-index: 1000;
+      background: rgba(255,255,255,0.9);
+      padding: 10px 15px;
+      border-radius: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+      max-height: 90vh;
+      overflow-y: auto;
+      font-size: 14px;
+    }
+    .layer-panel label { display:block; margin-bottom:8px; }
+    .slider-container { display:flex; align-items:center; margin-bottom:6px; }
+    .slider-container input { margin-left:6px; flex:1; }
+  </style>
+</head>
+<body>
+<h2>Web GIS KKPR & RTRW</h2>
+<div id="map"></div>
+
+<div class="layer-panel" id="layerPanel">
+  <h4>Basemap</h4>
+  <label><input type="checkbox" id="osmLayer" checked> OpenStreetMap</label>
+  <label><input type="checkbox" id="satLayer" checked> Citra Satelit</label>
+
+  <h4>KKPR</h4>
+  <label><input type="checkbox" id="kkprLayer" checked> Layer KKPR</label>
+
+  <h4>RTRW</h4>
+  <!-- Contoh untuk satu kategori, nanti di JS ditambah semua -->
+  <div id="rtrwFilters"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map').setView([-6.9, 107.6], 9);
+
+// Basemap
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+const satelit = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri, Maxar, Earthstar Geographics' }).addTo(map);
+
+// Basemap toggle
+document.getElementById('osmLayer').addEventListener('change', e => e.target.checked ? map.addLayer(osm) : map.removeLayer(osm));
+document.getElementById('satLayer').addEventListener('change', e => e.target.checked ? map.addLayer(satelit) : map.removeLayer(satelit));
+
+// ---------------- KKPR ----------------
+const kkprLayer = L.layerGroup().addTo(map);
+let lastHighlighted = null;
+
+fetch("data/kkpr.json")
+  .then(res => res.json())
+  .then(data => {
+    L.geoJSON(data, {
+      style: { color: "red", weight:2, fillOpacity:0 },
+      onEachFeature: function(feature, layer){
+        const p = feature.properties;
+        const pdfLink = "lampiran/"+(p.No_KKPR||"-")+".pdf";
+        const luasFormatted = p.Luas_KKPR ? `${p.Luas_KKPR} m²` : "-";
+        const popupContent = `
+          <table style="border-collapse:collapse;width:100%;font-size:13px;">
+            <tr><td>Nomor KKPR</td><td>${p.No_KKPR||"-"}</td></tr>
+            <tr><td>Nama Pemohon</td><td>${p.Nama_Usaha||"-"}</td></tr>
+            <tr><td>Kode KBLI</td><td>${p.KO_KBLI||"-"}</td></tr>
+            <tr><td>Alamat</td><td>${p.Alamat||"-"}</td></tr>
+            <tr><td>Desa/Kelurahan</td><td>${p.Desa_Kel||"-"}</td></tr>
+            <tr><td>Kecamatan</td><td>${p.Kec||"-"}</td></tr>
+            <tr><td>Kota/Kabupaten</td><td>${p.KoKab||"-"}</td></tr>
+            <tr><td>Jenis KKPR yang Diterbitkan</td><td>${p.Jns_KKPR||"-"}</td></tr>
+            <tr><td>Penerbit KKPR</td><td>${p.Penerbit||"-"}</td></tr>
+            <tr><td>Tanggal Terbit Dokumen KKPR</td><td>${p.Tagl_Terbi||"-"}</td></tr>
+            <tr><td>Dasar Pertimbangan Penerbitan KKPR</td><td>${p.Ket_KKPR||"-"}</td></tr>
+            <tr><td>Luas KKPR berdasarkan Dokumen</td><td>${luasFormatted}</td></tr>
+            <tr><td colspan="2" style="text-align:center;padding-top:6px;">
+              <a href="${pdfLink}" target="_blank">📄 Lihat Lampiran PDF</a>
+            </td></tr>
+          </table>
+        `;
+        layer.bindPopup(popupContent);
+
+        layer.on('click', function(){
+          if(lastHighlighted) lastHighlighted.setStyle({color:'red'});
+          layer.setStyle({color:'yellow'});
+          lastHighlighted = layer;
+        });
+      }
+    }).addTo(kkprLayer);
+  });
+
+// KKPR toggle
+document.getElementById('kkprLayer').addEventListener('change', e => e.target.checked ? map.addLayer(kkprLayer) : map.removeLayer(kkprLayer));
+
+// ---------------- RTRW ----------------
+const rtrwCategories = [
+  { name: "Badan Air", folder:true, parts:56, color:"rgba(0,123,255,0.5)" },
+  { name: "Kawasan Hutan Produksi", folder:true, parts:40, color:"rgba(34,139,34,0.5)" },
+  { name: "Kawasan Konservasi", folder:true, parts:15, color:"rgba(107,142,35,0.5)" },
+  { name: "Kawasan Perikanan", folder:true, parts:3, color:"rgba(0,206,209,0.5)" },
+  { name: "Kawasan Perlindungan Setempat", folder:true, parts:16, color:"rgba(160,82,45,0.5)" },
+  { name: "Kawasan Permukiman", folder:true, parts:106, color:"rgba(128,0,128,0.5)" },
+  // file tunggal
+  { name:"Kawasan Cagar Budaya", folder:false, file:"Kawasan Cagar Budaya.json", color:"rgba(255,165,0,0.5)"},
+  { name:"Kawasan Hutan Adat", folder:false, file:"Kawasan Hutan Adat.json", color:"rgba(0,128,0,0.5)"},
+  { name:"Kawasan Lindung Geologi", folder:false, file:"Kawasan Lindung Geologi.json", color:"rgba(255,0,255,0.5)"},
+  { name:"Kawasan Pariwisata", folder:false, file:"Kawasan Pariwisata.json", color:"rgba(255,192,203,0.5)"},
+  { name:"Kawasan Pembuangan Hasil Pengerukan di Laut", folder:false, file:"Kawasan Pembuangan Hasil Pengerukan di Laut.json", color:"rgba(0,255,255,0.5)"},
+  { name:"Kawasan Pencadangan Konservasi di Laut", folder:false, file:"Kawasan Pencadangan Konservasi di Laut.json", color:"rgba(0,100,0,0.5)"},
+  { name:"Kawasan Pergaraman", folder:false, file:"Kawasan Pergaraman.json", color:"rgba(255,215,0,0.5)"},
+  { name:"Kawasan Pertahanan dan Keamanan", folder:false, file:"Kawasan Pertahanan dan Keamanan.json", color:"rgba(128,128,0,0.5)"},
+  { name:"Kawasan Pertambangan dan Energi", folder:false, file:"Kawasan Pertambangan dan Energi.json", color:"rgba(139,69,19,0.5)"},
+];
+
+const rtrwLayers = {};
+const rtrwFiltersDiv = document.getElementById('rtrwFilters');
+
+rtrwCategories.forEach(cat => {
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = true;
+  checkbox.id = "chk_"+cat.name.replace(/\s+/g,'_');
+  const label = document.createElement('label');
+  label.appendChild(checkbox);
+  label.appendChild(document.createTextNode(" "+cat.name));
+
+  // slider transparansi
+  const sliderContainer = document.createElement('div');
+  sliderContainer.className='slider-container';
+  const slider = document.createElement('input');
+  slider.type='range'; slider.min=0; slider.max=1; slider.step=0.01; slider.value=0.5;
+  sliderContainer.appendChild(label); sliderContainer.appendChild(slider);
+  rtrwFiltersDiv.appendChild(sliderContainer);
+
+  const layerGroup = L.layerGroup().addTo(map);
+  rtrwLayers[cat.name] = { layer: layerGroup, slider: slider };
+
+  function loadPart(filePath){
+    fetch(filePath).then(res=>res.json()).then(data=>{
+      L.geoJSON(data, {
+        style: { fillColor: cat.color, weight:0.5, fillOpacity: parseFloat(slider.value) },
+      }).addTo(layerGroup);
+    });
+  }
+
+  if(cat.folder){
+    for(let i=1;i<=cat.parts;i++){
+      const partFile = `data/${cat.name.replace(/\s+/g,'_')}/${cat.name.replace(/\s+/g,'_')}_part${i}.json`;
+      loadPart(partFile);
+    }
+  } else {
+    loadPart(`data/${cat.file}`);
+  }
+
+  checkbox.addEventListener('change', e => {
+    e.target.checked ? map.addLayer(layerGroup) : map.removeLayer(layerGroup);
+  });
+
+  slider.addEventListener('input', e=>{
+    layerGroup.eachLayer(l=>l.setStyle({ fillOpacity: parseFloat(e.target.value) }));
+  });
+});
+</script>
+</body>
+</html>
