@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Web GIS KKPR</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin:0; padding:0; font-family: Arial, sans-serif; }
+        #map { height: 90vh; width: 100%; }
+        h2 { text-align: center; margin: 10px 0; }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        td {
+            padding: 4px 6px;
+            border-bottom: 1px solid #ddd;
+        }
+        td:first-child {
+            font-weight: bold;
+            width: 45%;
+        }
+    </style>
+</head>
+<body>
+    <h2>Web GIS KKPR</h2>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // 1. Buat map
+        var map = L.map('map').setView([-6.9, 107.6], 9);
+
+        // 2. Ganti basemap jadi citra satelit (ESRI)
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles © Esri &mdash; Source: Esri, Maxar, Earthstar Geographics'
+        }).addTo(map);
+
+        // 3. Load GeoJSON
+        fetch("data/kkpr.json")
+        .then(response => response.json())
+        .then(data => {
+            console.log("✅ Data GeoJSON berhasil dibaca:", data);
+
+            L.geoJSON(data, {
+                style: {
+                    color: "red",        // warna outline
+                    weight: 2,           // ketebalan garis
+                    fillOpacity: 0       // no fill (transparan)
+                },
+                onEachFeature: function (feature, layer) {
+                    const p = feature.properties;
+                    if (!p) return;
+
+                    const nomor = p.No_KKPR || p.no_kkpr || p.NOMOR || "-";
+                    const pdfLink = "lampiran/" + nomor + ".pdf";
+                    const luasFormatted = p.Luas_KKPR ? `${p.Luas_KKPR} m²` : "-";
+
+                    const popupContent = `
+                        <table>
+                            <tr><td>Nomor KKPR</td><td>${p.No_KKPR || "-"}</td></tr>
+                            <tr><td>Nama Pemohon</td><td>${p.Nama_Usaha || "-"}</td></tr>
+                            <tr><td>Kode KBLI</td><td>${p.KO_KBLI || "-"}</td></tr>
+                            <tr><td>Alamat</td><td>${p.Alamat || "-"}</td></tr>
+                            <tr><td>Desa/Kelurahan</td><td>${p.Desa_Kel || "-"}</td></tr>
+                            <tr><td>Kecamatan</td><td>${p.Kec || "-"}</td></tr>
+                            <tr><td>Kota/Kabupaten</td><td>${p.KoKab || "-"}</td></tr>
+                            <tr><td>Jenis KKPR yang Diterbitkan</td><td>${p.Jns_KKPR || "-"}</td></tr>
+                            <tr><td>Penerbit KKPR</td><td>${p.Penerbit || "-"}</td></tr>
+                            <tr><td>Tanggal Terbit Dokumen KKPR</td><td>${p.Tagl_Terbi || "-"}</td></tr>
+                            <tr><td>Dasar Pertimbangan Penerbitan KKPR</td><td>${p.Ket_KKPR || "-"}</td></tr>
+                            <tr><td>Luas KKPR berdasarkan Dokumen</td><td>${luasFormatted}</td></tr>
+                        </table>
+                        <br>
+                        <a href="${pdfLink}" target="_blank">📄 Lihat Lampiran PDF</a>
+                    `;
+
+                    layer.bindPopup(popupContent);
+                }
+            }).addTo(map);
+        })
+        .catch(err => console.error("❌ Error loading GeoJSON:", err));
+    </script>
+</body>
+</html>
