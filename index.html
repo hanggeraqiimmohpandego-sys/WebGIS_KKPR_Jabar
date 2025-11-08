@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Web GIS KKPR & RTRW</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+body { margin:0; padding:0; font-family:"Segoe UI", Arial, sans-serif; }
+#map { height:100vh; width:100%; }
+h2 { position:absolute; top:10px; left:10px; background:rgba(255,255,255,0.8); padding:6px 14px; border-radius:10px; z-index:900; font-weight:bold; box-shadow:0 2px 6px rgba(0,0,0,0.2); }
+
+/* Layer toggle panel */
+.layer-panel { position:absolute; top:50px; left:10px; z-index:1000; background:rgba(255,255,255,0.85); padding:10px 12px; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,0.2);}
+.layer-panel label { display:block; margin-bottom:6px; cursor:pointer;}
+.slider-label { display:flex; justify-content:space-between; font-size:12px; margin-top:6px;}
+</style>
+</head>
+<body>
+<h2>Web GIS KKPR & RTRW</h2>
+<div id="map"></div>
+
+<div class="layer-panel" id="layerPanel">
+  <label><input type="checkbox" id="osmLayer" checked> Basemap: OpenStreetMap</label>
+  <label><input type="checkbox" id="satLayer" checked> Basemap: Satelit</label>
+  <hr>
+  <label><input type="checkbox" id="kkprLayer" checked> Layer KKPR</label>
+  <hr>
+  <b>Layer RTRW</b>
+  <label><input type="checkbox" id="industriLayer" checked> Kawasan Industri</label>
+  <input type="range" id="industriOpacity" min="0" max="1" step="0.05" value="0.6">
+  <label><input type="checkbox" id="transportLayer" checked> Kawasan Transportasi</label>
+  <input type="range" id="transportOpacity" min="0" max="1" step="0.05" value="0.6">
+  <label><input type="checkbox" id="perlindunganLayer" checked> Kawasan Perlindungan</label>
+  <input type="range" id="perlindunganOpacity" min="0" max="1" step="0.05" value="0.6">
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// 1. Map
+const map = L.map('map').setView([-6.9, 107.6], 9);
+
+// 2. Basemap
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'&copy; OSM contributors' }).addTo(map);
+const satelit = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'&copy; Esri, Maxar' });
+
+// 3. Layer KKPR
+let kkprLayer = L.layerGroup().addTo(map);
+let kkprData; // simpan GeoJSON
+fetch('data/kkpr.json')
+  .then(res=>res.json())
+  .then(data=>{
+    kkprData=data;
+    const geo=L.geoJSON(data,{
+      style:{ color:'red', weight:2, fillOpacity:0.2 },
+      onEachFeature: function(feature,layer){
+        layer.on('click', onKKPRClick);
+      }
+    }).addTo(kkprLayer);
+    kkprLayer.bringToFront();
+  });
+
+let lastHighlight;
+function onKKPRClick(e){
+    const clickedLatLng = e.latlng;
+    const overlapping = kkprData.features.filter(f=>{
+        const tempLayer=L.geoJSON(f);
+        return tempLayer.getBounds().contains(clickedLatLng);
+    });
+
+    if(overlapping.length>1){
+        let listHtml='<b>Beberapa KKPR ditemukan:</b><br>';
+        overlapping.forEach(f=>{
+            listHtml+=`<a href="#" class="kkpr-link" data-id="${f.properties.No_KKPR}">${f.properties.No_KKPR}</a><br>`;
+        });
+        const tempPopup=L.popup().setLatLng(clickedLatLng).setContent(listHtml).openOn(map);
+        document.querySelectorAll('.kkpr-link').forEach(el=>{
+            el.addEventListener('click', function(ev){
+                ev.preventDefault();
+                const kkprId=this.dataset.id;
+                const feature=kkprData.features.find(f=>f.properties.No_KKPR===kkprId);
+                zoomToKKPR(feature);
+            });
+        });
+    }else{
+        zoomToKKPR(overlapping[0]);
+    }
+}
+
+function zoomToKKPR(feature){
+    if(lastHighlight) map.removeLayer(lastHighlight);
+    const layer=L.geoJSON(feature,{style:{color:'yellow',weight:3,fillOpacity:0.3}}).addTo(map);
+    lastHighlight=layer;
+    map.fitBounds(layer.getBounds());
+    const p=feature.properties;
+    const luasFormatted=p.Luas_KKPR ? `${p.Luas_KKPR} m²` : "-";
+    const popupContent=`
+      <table style="border-collapse:collapse;width:100%;font-size:13px;">
+        <tr><td>Nomor KKPR</td><td>${p.No_KKPR||"-"}</td></tr>
+        <tr><td>Nama Pemohon</td><td>${p.Nama_Usaha||"-"}</td></tr>
+        <tr><td>Kode KBLI</td><td>${p.KO_KBLI||"-"}</td></tr>
+        <tr><td>Alamat</td><td>${p.Alamat||"-"}</td></tr>
+        <tr><td>Desa/Kelurahan</td><td>${p.Desa_Kel||"-"}</td></tr>
+        <tr><td>Kecamatan</td><td>${p.Kec||"-"}</td></tr>
+        <tr><td>Kota/Kabupaten</td><td>${p.KoKab||"-"}</td></tr>
+        <tr><td>Jenis KKPR yang Diterbitkan</td><td>${p.Jns_KKPR||"-"}</td></tr>
+        <tr><td>Penerbit KKPR</td><td>${p.Penerbit||"-"}</td></tr>
+        <tr><td>Tanggal Terbit Dokumen KKPR</td><td>${p.Tagl_Terbi||"-"}</td></tr>
+        <tr><td>Dasar Pertimbangan Penerbitan KKPR</td><td>${p.Ket_KKPR||"-"}</td></tr>
+        <tr><td>Luas KKPR berdasarkan Dokumen</td><td>${luasFormatted}</td></tr>
+      </table>
+    `;
+    layer.bindPopup(popupContent).openPopup();
+}
+
+// 4. Layer RTRW
+function loadRTRW(file, style){
+    let l=L.layerGroup();
+    for(let i=1;i<1000;i++){
+        let path=file.replace('.json',`_part${i}.json`);
+        fetch(path)
+          .then(res=>{ if(res.ok) return res.json(); })
+          .then(data=>{ if(data) L.geoJSON(data,{style:style}).addTo(l); })
+          .catch(()=>{});
+    }
+    return l;
+}
+const industriLayer=loadRTRW('data/Kawasan Peruntukan Industri.json',{color:'#690000', fillColor:'#690000', fillOpacity:0.6});
+const transportLayer=loadRTRW('data/Kawasan Transportasi.json',{color:'#d73700', fillColor:'#d73700', fillOpacity:0.6});
+const perlindunganLayer=loadRTRW('data/Kawasan yang Memberikan Perlindungan terhadap Kawasan Bawahannya.json',{color:'#234128', fillColor:'#234128', fillOpacity:0.6});
+
+industriLayer.addTo(map);
+transportLayer.addTo(map);
+perlindunganLayer.addTo(map);
+
+// Checkbox filter
+document.getElementById('osmLayer').addEventListener('change', e=> e.target.checked ? map.addLayer(osm) : map.removeLayer(osm));
+document.getElementById('satLayer').addEventListener('change', e=> e.target.checked ? map.addLayer(satelit) : map.removeLayer(satelit));
+document.getElementById('kkprLayer').addEventListener('change', e=> e.target.checked ? map.addLayer(kkprLayer) : map.removeLayer(kkprLayer));
+document.getElementById('industriLayer').addEventListener('change', e=> e.target.checked ? map.addLayer(industriLayer) : map.removeLayer(industriLayer));
+document.getElementById('transportLayer').addEventListener('change', e=> e.target.checked ? map.addLayer(transportLayer) : map.removeLayer(transportLayer));
+document.getElementById('perlindunganLayer').addEventListener('change', e=> e.target.checked ? map.addLayer(perlindunganLayer) : map.removeLayer(perlindunganLayer));
+
+// Slider transparansi
+document.getElementById('industriOpacity').addEventListener('input', e=> industriLayer.eachLayer(l=> l.setStyle({fillOpacity:e.target.value})));
+document.getElementById('transportOpacity').addEventListener('input', e=> transportLayer.eachLayer(l=> l.setStyle({fillOpacity:e.target.value})));
+document.getElementById('perlindunganOpacity').addEventListener('input', e=> perlindunganLayer.eachLayer(l=> l.setStyle({fillOpacity:e.target.value})));
+
+</script>
+</body>
+</html>
