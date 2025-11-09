@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>WebGIS KKPR & RTRW</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+    #map { height: 95vh; width: 100%; }
+    .popup-list { font-size: 13px; line-height: 1.4; }
+    .popup-list button {
+      margin-top: 5px;
+      padding: 4px 6px;
+      background: #0078ff;
+      border: none;
+      color: white;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .popup-list button:hover { background: #005fcc; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+  <script src="style/rtrw_style.js"></script>
+
+  <script>
+    // Inisialisasi peta
+    const map = L.map('map').setView([-6.9, 107.6], 8);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: '© Esri, Maxar, Earthstar Geographics'
+    }).addTo(map);
+
+    const defaultColor = "#FF0000";
+
+    // ======================
+    // Fungsi RTRW
+    // ======================
+    async function loadRTRW(zipPath, kabName) {
+      const response = await fetch(zipPath);
+      const blob = await response.blob();
+      const zip = await JSZip.loadAsync(blob);
+
+      const fileName = Object.keys(zip.files).find(f => f.endsWith(".json") || f.endsWith(".geojson"));
+      if (!fileName) return null;
+
+      const content = await zip.files[fileName].async("string");
+      const data = JSON.parse(content);
+
+      const layer = L.geoJSON(data, {
+        style: f => ({
+          color: rtrwStyleByNama[f.properties?.NAMOBJ] || defaultColor,
+          weight: 1,
+          fillOpacity: 0.4
+        }),
+        onEachFeature: (feature, layer) => {
+          const nama = feature.properties?.NAMOBJ || "-";
+          layer.bindPopup(`<b>Jenis Kawasan:</b> ${nama}<br><b>Kab/Kota:</b> ${kabName}`);
+        }
+      });
+
+      return layer;
+    }
+
+    // ======================
+    // Fungsi KKPR
+    // ======================
+    async function loadKKPR() {
+      const response = await fetch("data/kkpr.json");
+      const data = await response.json();
+
+      // Simpan semua marker KKPR biar bisa dicek jarak antar titik
+      const kkprMarkers = [];
+
+      const kkprLayer = L.geoJSON(data, {
+        pointToLayer: (feature, latlng) => {
+          const marker = L.circleMarker(latlng, {
+            radius: 6,
+            color: "yellow",
+            fillColor: "red",
+            fillOpacity: 0.9,
+            weight: 1
+          });
+          kkprMarkers.push({ feature, marker, latlng });
+          return marker;
+        }
+      });
+
+      // Event click dengan deteksi multi-KKPR di radius tertentu
+      kkprLayer.on('click', e => {
+        const clickedLatLng = e.latlng;
+        const nearby = kkprMarkers.filter(m => map.distance(clickedLatLng, m.latlng) < 20);
+
+        if (nearby.length > 1) {
+          // Ada beberapa KKPR di lokasi sekitar
+          let listHTML = `<div class='popup-list'><b>Ditemukan ${nearby.length} KKPR di sekitar lokasi ini:</b><br>`;
+          nearby.forEach((m, i) => {
+            listHTML += `<div>${m.feature.properties.No_KKPR || "-"}</div>
+                         <button onclick="showKKPRPopup(${i})">Lihat Detail</button><hr>`;
+          });
+          listHTML += `</div>`;
+
+          e.layer.bindPopup(listHTML).openPopup();
+
+          // Biar bisa dipanggil dari tombol
+          window.showKKPRPopup = idx => {
+            const p = nearby[idx].feature.properties;
+            const pdfLink = "lampiran/" + (p.No_KKPR || "") + ".pdf";
+            const popup = `
+              <table style="width:100%; font-size:13px;">
+                <tr><td><b>Nomor KKPR</b></td><td>${p.No_KKPR || "-"}</td></tr>
+                <tr><td><b>Nama Pemohon</b></td><td>${p.Nama_Usaha || "-"}</td></tr>
+                <tr><td><b>Kode KBLI</b></td><td>${p.KO_KBLI || "-"}</td></tr>
+                <tr><td><b>Alamat</b></td><td>${p.Alamat || "-"}</td></tr>
+                <tr><td><b>Desa/Kelurahan</b></td><td>${p.Desa_Kel || "-"}</td></tr>
+                <tr><td><b>Kecamatan</b></td><td>${p.Kec || "-"}</td></tr>
+                <tr><td><b>Kota/Kabupaten</b></td><td>${p.KoKab || "-"}</td></tr>
+                <tr><td><b>Luas</b></td><td>${p.Luas_KKPR || "-"} m²</td></tr>
+              </table>
+              <br><a href="${pdfLink}" target="_blank">📄 Lihat Lampiran</a>
+            `;
+            e.layer.bindPopup(popup).openPopup();
+          };
+        } else {
+          // Hanya satu KKPR
+          const p = nearby[0].feature.properties;
+          const pdfLink = "lampiran/" + (p.No_KKPR || "") + ".pdf";
+          const popup = `
+            <table style="width:100%; font-size:13px;">
+              <tr><td><b>Nomor KKPR</b></td><td>${p.No_KKPR || "-"}</td></tr>
+              <tr><td><b>Nama Pemohon</b></td><td>${p.Nama_Usaha || "-"}</td></tr>
+              <tr><td><b>Kode KBLI</b></td><td>${p.KO_KBLI || "-"}</td></tr>
+              <tr><td><b>Alamat</b></td><td>${p.Alamat || "-"}</td></tr>
+              <tr><td><b>Desa/Kelurahan</b></td><td>${p.Desa_Kel || "-"}</td></tr>
+              <tr><td><b>Kecamatan</b></td><td>${p.Kec || "-"}</td></tr>
+              <tr><td><b>Kota/Kabupaten</b></td><td>${p.KoKab || "-"}</td></tr>
+              <tr><td><b>Luas</b></td><td>${p.Luas_KKPR || "-"} m²</td></tr>
+            </table>
+            <br><a href="${pdfLink}" target="_blank">📄 Lihat Lampiran</a>
+          `;
+          e.layer.bindPopup(popup).openPopup();
+        }
+      });
+
+      kkprLayer.addTo(map);
+      return kkprLayer;
+    }
+
+    // ======================
+    // Load Semua Data
+    // ======================
+    const kabFiles = [
+      "RTRWP Kab Bogor.zip",
+      "RTRWP Kab Bandung.zip",
+      "RTRWP Kab Bekasi.zip"
+    ];
+
+    const overlays = {};
+    (async function () {
+      const kkprLayer = await loadKKPR();
+
+      for (const file of kabFiles) {
+        const kabName = file.replace("RTRWP ", "").replace(".zip", "");
+        const layer = await loadRTRW("data/" + file, kabName);
+        if (layer) overlays[kabName] = layer;
+      }
+
+      L.control.layers(null, { "📍 KKPR": kkprLayer, ...overlays }, { collapsed: false }).addTo(map);
+    })();
+  </script>
+</body>
+</html>
