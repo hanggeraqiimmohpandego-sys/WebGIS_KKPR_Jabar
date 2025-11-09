@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Web GIS KKPR & RTRW</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin:0; padding:0; font-family: Arial, sans-serif; }
+        #map { height: 95vh; width: 100%; }
+        .leaflet-popup-content ul { margin: 0; padding-left: 16px; }
+        .leaflet-popup-content li { cursor: pointer; color: blue; text-decoration: underline; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <!-- Library -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+    <script src="style/rtrw_style.js"></script>
+
+    <script>
+        // Inisialisasi peta
+        var map = L.map('map').setView([-6.9, 107.6], 8);
+
+        // Basemap citra satelit
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '© Esri, Maxar, Earthstar Geographics'
+        }).addTo(map);
+
+        // Pane khusus KKPR agar selalu di atas RTRW
+        map.createPane('paneKKPR');
+        map.getPane('paneKKPR').style.zIndex = 650;
+
+        const defaultColor = "#FF0000";
+
+        // ==============================
+        // Fungsi untuk RTRW per kabupaten
+        // ==============================
+        async function loadRTRW(zipPath, kabName) {
+            const response = await fetch(zipPath);
+            const blob = await response.blob();
+            const zip = await JSZip.loadAsync(blob);
+
+            const fileName = Object.keys(zip.files).find(f => f.endsWith(".json") || f.endsWith(".geojson"));
+            if (!fileName) return null;
+
+            const content = await zip.files[fileName].async("string");
+            const data = JSON.parse(content);
+
+            const layer = L.geoJSON(data, {
+                style: f => ({
+                    color: rtrwStyleByNama[f.properties?.NAMOBJ] || defaultColor,
+                    weight: 1,
+                    fillOpacity: 0.4
+                }),
+                onEachFeature: (feature, layer) => {
+                    const nama = feature.properties?.NAMOBJ || "-";
+                    layer.bindPopup(`<b>Jenis Kawasan:</b> ${nama}<br><b>Kab/Kota:</b> ${kabName}`);
+                }
+            });
+
+            return layer;
+        }
+
+        // ==============================
+        // Fungsi untuk KKPR (support multiple popup)
+        // ==============================
+        async function loadKKPR() {
+            const response = await fetch("data/kkpr.json");
+            const data = await response.json();
+
+            const pointGroups = {};
+
+            data.features.forEach(f => {
+                if (!f.geometry || f.geometry.type !== "Point") return;
+                const [lng, lat] = f.geometry.coordinates;
+                const key = `${lng.toFixed(5)},${lat.toFixed(5)}`;
+
+                if (!pointGroups[key]) pointGroups[key] = [];
+                pointGroups[key].push(f);
+            });
+
+            const kkprLayer = L.geoJSON(data, {
+                pane: 'paneKKPR',
+                pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+                    radius: 6,
+                    color: "yellow",
+                    fillColor: "red",
+                    fillOpacity: 0.9,
+                    weight: 1
+                }),
+                onEachFeature: (feature, layer) => {
+                    const [lng, lat] = feature.geometry.coordinates;
+                    const key = `${lng.toFixed(5)},${lat.toFixed(5)}`;
+                    const group = pointGroups[key];
+
+                    if (group.length > 1) {
+                        const listItems = group.map((g, i) => 
+                            `<li onclick="showKKPRDetail('${key}',${i})">${g.properties.No_KKPR || 'Tanpa Nomor'}</li>`
+                        ).join('');
+                        layer.bindPopup(`
+                            <b>📍 ${group.length} KKPR di lokasi ini:</b>
+                            <ul>${listItems}</ul>
+                        `);
+                    } else {
+                        const p = feature.properties;
+                        const pdfLink = "lampiran/" + (p.No_KKPR || "") + ".pdf";
+                        const popup = `
+                            <table style="width:100%;">
+                                <tr><td><b>Nomor KKPR</b></td><td>${p.No_KKPR || "-"}</td></tr>
+                                <tr><td><b>Nama Pemohon</b></td><td>${p.Nama_Usaha || "-"}</td></tr>
+                                <tr><td><b>Kode KBLI</b></td><td>${p.KO_KBLI || "-"}</td></tr>
+                                <tr><td><b>Alamat</b></td><td>${p.Alamat || "-"}</td></tr>
+                                <tr><td><b>Desa/Kelurahan</b></td><td>${p.Desa_Kel || "-"}</td></tr>
+                                <tr><td><b>Kecamatan</b></td><td>${p.Kec || "-"}</td></tr>
+                                <tr><td><b>Kota/Kabupaten</b></td><td>${p.KoKab || "-"}</td></tr>
+                                <tr><td><b>Luas</b></td><td>${p.Luas_KKPR || "-"} m²</td></tr>
+                            </table>
+                            <br><a href="${pdfLink}" target="_blank">📄 Lihat Lampiran</a>
+                        `;
+                        layer.bindPopup(popup);
+                    }
+                }
+            });
+
+            kkprLayer.addTo(map);
+            window._kkprGroups = pointGroups;
+            return kkprLayer;
+        }
+
+        // ==============================
+        // Fungsi global untuk popup KKPR detail
+        // ==============================
+        function showKKPRDetail(key, index) {
+            const group = window._kkprGroups[key];
+            if (!group || !group[index]) return;
+
+            const f = group[index];
+            const p = f.properties;
+            const pdfLink = "lampiran/" + (p.No_KKPR || "") + ".pdf";
+            const popup = `
+                <table style="width:100%;">
+                    <tr><td><b>Nomor KKPR</b></td><td>${p.No_KKPR || "-"}</td></tr>
+                    <tr><td><b>Nama Pemohon</b></td><td>${p.Nama_Usaha || "-"}</td></tr>
+                    <tr><td><b>Kode KBLI</b></td><td>${p.KO_KBLI || "-"}</td></tr>
+                    <tr><td><b>Alamat</b></td><td>${p.Alamat || "-"}</td></tr>
+                    <tr><td><b>Desa/Kelurahan</b></td><td>${p.Desa_Kel || "-"}</td></tr>
+                    <tr><td><b>Kecamatan</b></td><td>${p.Kec || "-"}</td></tr>
+                    <tr><td><b>Kota/Kabupaten</b></td><td>${p.KoKab || "-"}</td></tr>
+                    <tr><td><b>Luas</b></td><td>${p.Luas_KKPR || "-"} m²</td></tr>
+                </table>
+                <br><a href="${pdfLink}" target="_blank">📄 Lihat Lampiran</a>
+            `;
+
+            const [lng, lat] = f.geometry.coordinates;
+            map.closePopup();
+            L.popup()
+                .setLatLng([lat, lng])
+                .setContent(popup)
+                .openOn(map);
+        }
+
+        // ==============================
+        // Load semua data
+        // ==============================
+        const kabFiles = [
+            "RTRWP Kab Bandung.zip",
+            "RTRWP Kab Bogor.zip",
+            "RTRWP Kab Bekasi.zip"
+            // tambahkan semua file kab/kota lain di sini
+        ];
+
+        const overlays = {};
+        (async function() {
+            const kkprLayer = await loadKKPR();
+
+            for (const file of kabFiles) {
+                const kabName = file.replace("RTRWP ", "").replace(".zip", "");
+                const layer = await loadRTRW("data/" + file, kabName);
+                if (layer) overlays[kabName] = layer;
+            }
+
+            // Layer control
+            L.control.layers(null, {
+                "📍 KKPR": kkprLayer,
+                ...overlays
+            }, { collapsed: false }).addTo(map);
+        })();
+    </script>
+</body>
+</html>
