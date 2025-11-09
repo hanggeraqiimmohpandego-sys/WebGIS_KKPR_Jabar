@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Web GIS RTRW Provinsi Jawa Barat</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin:0; padding:0; font-family: Arial, sans-serif; }
+        #map { height: 90vh; width: 100%; }
+        h2 { text-align: center; margin: 10px 0; }
+
+        .legend {
+            background: white;
+            padding: 8px;
+            border-radius: 8px;
+            box-shadow: 0 0 8px rgba(0,0,0,0.3);
+            font-size: 13px;
+            line-height: 18px;
+            width: 220px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .legend-color {
+            width: 18px;
+            height: 18px;
+            border: 1px solid #999;
+            margin-right: 6px;
+        }
+        .legend-content {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 6px;
+            transition: all 0.3s ease-in-out;
+        }
+        .legend-title {
+            cursor: pointer;
+            user-select: none;
+            font-weight: bold;
+        }
+        .legend-title:hover {
+            color: #007bff;
+        }
+    </style>
+</head>
+<body>
+    <h2>Web GIS RTRW Provinsi Jawa Barat</h2>
+    <div id="map"></div>
+
+    <!-- JS LIBRARIES -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+    <script src="style/rtrw_style.js"></script>
+
+    <script>
+        // Inisialisasi peta
+        var map = L.map('map').setView([-6.9, 107.6], 8);
+
+        // Basemap Citra Satelit
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics'
+        }).addTo(map);
+
+        // Warna default fallback
+        const defaultColor = "#FF0000";
+
+        // Fungsi untuk memuat dan menampilkan ZIP GeoJSON
+        async function loadGeoJSONFromZip(zipPath, kabName, color) {
+            try {
+                const response = await fetch(zipPath);
+                const blob = await response.blob();
+
+                const zip = await JSZip.loadAsync(blob);
+                const geojsonFile = Object.keys(zip.files).find(f => f.endsWith(".json") || f.endsWith(".geojson"));
+                if (!geojsonFile) {
+                    console.error("Tidak ditemukan file .json di ZIP:", kabName);
+                    return null;
+                }
+
+                const content = await zip.files[geojsonFile].async("string");
+                const data = JSON.parse(content);
+
+                const layer = L.geoJSON(data, {
+                    style: function(feature) {
+                        const nama = feature.properties?.NAMOBJ;
+                        const fillColor = rtrwStyleByNama[nama] || color || defaultColor;
+                        return {
+                            color: fillColor,
+                            weight: 1,
+                            fillOpacity: 0.4
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        const p = feature.properties;
+                        if (!p) return;
+                        const popupHtml = `
+                            <table style="border-collapse: collapse; width:100%;">
+                                <tr><td><b>Nama Kawasan</b></td><td>${p.NAMOBJ || "-"}</td></tr>
+                                <tr><td><b>Kab/Kota</b></td><td>${kabName}</td></tr>
+                            </table>
+                        `;
+                        layer.bindPopup(popupHtml);
+                    }
+                }).addTo(map);
+
+                return layer;
+            } catch (err) {
+                console.error("Gagal memuat ZIP untuk", kabName, err);
+                return null;
+            }
+        }
+
+        // Daftar file ZIP di folder "data"
+        const kabupatenFiles = [
+            "RTRWP Kab Bandung Barat.zip",
+            "RTRWP Kab Bandung.zip",
+            "RTRWP Kab Bekasi.zip",
+            "RTRWP Kab Bogor.zip",
+            "RTRWP Kab Ciamis.zip",
+            "RTRWP Kab Cianjur.zip",
+            "RTRWP Kab Cirebon.zip",
+            "RTRWP Kab Garut.zip",
+            "RTRWP Kab Indramayu.zip",
+            "RTRWP Kab Karawang.zip",
+            "RTRWP Kab Kuningan.zip",
+            "RTRWP Kab Majalengka.zip",
+            "RTRWP Kab Pangandaran.zip",
+            "RTRWP Kab Purwakarta.zip",
+            "RTRWP Kab Subang.zip",
+            "RTRWP Kab Sumedang.zip",
+            "RTRWP Kab Tasikmalaya.zip",
+            "RTRWP Kota Bandung.zip",
+            "RTRWP Kota Banjar.zip",
+            "RTRWP Kota Bekasi.zip",
+            "RTRWP Kota Bogor.zip",
+            "RTRWP Kota Cimahi.zip",
+            "RTRWP Kota Cirebon.zip",
+            "RTRWP Kota Depok.zip",
+            "RTRWP Kota Sukabumi.zip",
+            "RTRWP Kota Tasikmalaya.zip"
+        ];
+
+        // Warna acak per kabupaten (biar beda outline)
+        function randomColor() {
+            return `hsl(${Math.floor(Math.random() * 360)}, 70%, 50%)`;
+        }
+
+        const overlayLayers = {};
+
+        // Muat semua ZIP satu per satu
+        (async function(){
+            for (const file of kabupatenFiles) {
+                const kabName = file.replace("RTRWP ", "").replace(".zip", "");
+                const path = "data/" + file;
+                const color = randomColor();
+                const layer = await loadGeoJSONFromZip(path, kabName, color);
+                if (layer) overlayLayers[kabName] = layer;
+            }
+            L.control.layers(null, overlayLayers, { collapsed: false }).addTo(map);
+        })();
+
+        // =============================
+        // 4️⃣ Legenda Otomatis (expand/collapse)
+        // =============================
+        const legend = L.control({ position: 'bottomright' });
+        legend.onAdd = function(map) {
+            const div = L.DomUtil.create('div', 'legend');
+            div.innerHTML = `
+                <div class="legend-title" id="legendToggle">📘 Legenda RTRW ▾</div>
+                <div id="legendContent" class="legend-content" style="display: none;"></div>
+            `;
+
+            const legendContent = div.querySelector("#legendContent");
+            for (const [nama, color] of Object.entries(rtrwStyleByNama)) {
+                legendContent.innerHTML += `
+                    <div class="legend-item">
+                        <div class="legend-color" style="background:${color}"></div>
+                        ${nama}
+                    </div>
+                `;
+            }
+
+            // interaksi klik judul legend
+            const toggle = div.querySelector("#legendToggle");
+            toggle.addEventListener("click", () => {
+                const visible = legendContent.style.display !== "none";
+                legendContent.style.display = visible ? "none" : "block";
+                toggle.innerHTML = visible ? "📘 Legenda RTRW ▸" : "📘 Legenda RTRW ▾";
+            });
+
+            return div;
+        };
+        legend.addTo(map);
+    </script>
+</body>
+</html>
