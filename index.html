@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Web GIS KKPR & RTRW Jawa Barat</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin:0; padding:0; font-family:"Segoe UI", Arial, sans-serif; }
+    #map { height:100vh; width:100%; }
+    h2 { position:absolute; top:10px; left:15px; background:rgba(255,255,255,0.8); padding:6px 14px; border-radius:10px; z-index:900; font-weight:bold; }
+    .layer-toggle { position:absolute; top:70px; left:15px; z-index:1000; background:rgba(255,255,255,0.8); border-radius:10px; padding:8px; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.2); backdrop-filter: blur(6px); }
+    .layer-toggle:hover { background: rgba(255,255,255,0.9);}
+    .layer-icon { width:20px; height:16px; position:relative; }
+    .layer-icon div { width:100%; height:4px; background:#d00; position:absolute; transform: skewX(-25deg); border-radius:2px; }
+    .layer-icon div:nth-child(1) { top:0; }
+    .layer-icon div:nth-child(2) { top:6px; }
+    .layer-icon div:nth-child(3) { top:12px; }
+    .layer-panel {
+      position:absolute; top:110px; left:15px; z-index:999; background:rgba(255,255,255,0.15);
+      backdrop-filter: blur(10px); border-radius:12px; padding:10px 15px; box-shadow:0 4px 15px rgba(0,0,0,0.3);
+      color:white; width:260px; font-size:14px; max-height: calc(100vh - 130px);
+      display:flex; flex-direction:column; gap:8px; opacity:0; transform:translateY(-10px); pointer-events:none;
+      transition: all 0.4s ease;
+    }
+    .layer-panel.show { opacity:1; transform:translateY(0); pointer-events:auto; }
+    .layer-panel label { display:block; margin-bottom:8px; cursor:pointer; }
+    .layer-panel input[type="checkbox"] { margin-right:6px; }
+    .transparency-control { width:100%; margin-bottom:10px; }
+    #rtrwLayerList { overflow-y: auto; padding-right: 6px; max-height: calc(100vh - 260px); }
+    #rtrwLayerList label { color: #fff; display:block; margin-bottom:6px; }
+    #rtrwLayerList input[type="range"] { width:100%; margin-bottom:10px; }
+    #rtrwLayerList::-webkit-scrollbar { width:10px; }
+    #rtrwLayerList::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius:6px; }
+    .kbli-link { color: #0078ff; font-size: 12px; text-decoration: none; margin-left: 5px; }
+    .kbli-link:hover { text-decoration: underline; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    td { padding: 3px 5px; vertical-align: top; }
+    .zone-title { font-weight:bold; color:#d00; margin-top:6px; }
+    .zone-section { margin-bottom:6px; }
+
+    /* Upload Shapefile button */
+    #shpUploadContainer { position:absolute; top:400px; left:15px; z-index:1000; background:rgba(255,255,255,0.8); padding:8px; border-radius:10px; }
+  </style>
+</head>
+<body>
+<h2>Web GIS KKPR & RTRW Jawa Barat</h2>
+<div id="map"></div>
+
+<div class="layer-toggle" id="layerToggle">
+  <div class="layer-icon"><div></div><div></div><div></div></div>
+</div>
+
+<div class="layer-panel" id="layerPanel">
+  <label><input type="checkbox" id="osmLayer" checked> Basemap: OpenStreetMap</label>
+  <label><input type="checkbox" id="satLayer" checked> Basemap: Citra Satelit</label>
+  <label><input type="checkbox" id="kkprLayer" checked> Layer KKPR</label>
+  <hr>
+  <div id="rtrwLayerList"></div>
+</div>
+
+<!-- Upload Shapefile -->
+<div id="shpUploadContainer">
+  <label><b>Upload Shapefile (ZIP): </b></label>
+  <input type="file" id="shpUpload" accept=".zip" />
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+<script src="https://unpkg.com/shpjs@latest/dist/shp.min.js"></script>
+<script src="style/rtrw_style.js"></script>
+<script src="style/rtrwZoningInfo.js"></script>
+
+<script>
+const map = L.map('map').setView([-6.9, 107.6], 8);
+
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'&copy; OpenStreetMap' }).addTo(map);
+const satelit = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'© Esri, Maxar' }).addTo(map);
+
+const kkprLayer = L.layerGroup().addTo(map);
+const rtrwLayers = {};
+let allKKPR = [];
+let currentHighlight = null;
+
+// ================= Load RTRW =================
+async function loadRTRW(zipPath, kabName) {
+  try {
+    const resp = await fetch(zipPath);
+    const blob = await resp.blob();
+    const zip = await JSZip.loadAsync(blob);
+    const fileName = Object.keys(zip.files).find(f => f.endsWith(".json") || f.endsWith(".geojson"));
+    if (!fileName) return;
+    const content = await zip.files[fileName].async("string");
+    const data = JSON.parse(content);
+
+    const layer = L.geoJSON(data, {
+      style: f => ({ color: rtrwStyleByNama[f.properties?.NAMOBJ] || "#FF0000", weight:1, fillOpacity:0.5 }),
+      onEachFeature: (feature, lyr) => {
+        const name = feature.properties?.NAMOBJ || "-";
+        lyr.on('click', (e)=> {
+          const clickLatLng = e.latlng;
+          const zoneInfo = rtrwZoningInfo[name];
+          let html = `<div class="zone-title">${name}</div>`;
+          if(zoneInfo){
+            html += ['allowed','conditional','forbidden'].map(key=>{
+              const arr = zoneInfo[key];
+              if(!arr || arr.length===0) return '';
+              return `<div class="zone-section"><b>${key.charAt(0).toUpperCase()+key.slice(1)}:</b><ul>${arr.map(a=>`<li>${a}</li>`).join('')}</ul></div>`;
+            }).join('');
+          } else { html += "<i>Informasi zona tidak tersedia</i>"; }
+          L.popup().setLatLng(clickLatLng).setContent(html).openOn(map);
+        });
+      }
+    }).addTo(map);
+
+    rtrwLayers[kabName] = layer;
+    const div = document.getElementById("rtrwLayerList");
+    const id = kabName.replace(/\s/g,"");
+    div.insertAdjacentHTML("beforeend", `
+      <label><input type="checkbox" id="${id}" checked> RTRW: ${kabName}</label>
+      <input type="range" id="${id}_opacity" min="0" max="1" step="0.05" value="0.5" class="transparency-control">
+    `);
+    document.getElementById(id).addEventListener("change", e=> e.target.checked ? map.addLayer(layer) : map.removeLayer(layer));
+    document.getElementById(id+"_opacity").addEventListener("input", e=> layer.setStyle({fillOpacity: parseFloat(e.target.value)}));
+
+  } catch(err){ console.error("Gagal load RTRW:", kabName, err); }
+}
+
+// ================= Load KKPR =================
+fetch("data/kkpr.json").then(r=>r.json()).then(data=>{
+  L.geoJSON(data, {
+    style: { color:"red", weight:2, fillOpacity:0 },
+    onEachFeature: (feature, layer)=>{
+      layer.kkprData = feature.properties;
+      allKKPR.push(layer);
+    }
+  }).addTo(kkprLayer);
+});
+
+// ================= Map Click KKPR =================
+map.on('click', function(e){
+  const latlng = e.latlng;
+  const hits = allKKPR.filter(layer=>layer.getBounds().contains(latlng));
+  if(hits.length===0) return;
+
+  let popupHtml = "<b>Daftar KKPR di lokasi ini:</b><br><ul>";
+  hits.forEach((layer,i)=> popupHtml += `<li><a href="#" onclick="selectKKPR(${i});return false;">${layer.kkprData.No_KKPR}</a></li>`);
+  popupHtml += "</ul>";
+  L.popup().setLatLng(latlng).setContent(popupHtml).openOn(map);
+
+  window.selectKKPR = function(index){
+    const layer = hits[index];
+    if(currentHighlight) currentHighlight.setStyle({ color:"red", fillOpacity:0 });
+    layer.setStyle({ color:"yellow", fillOpacity:0.7 });
+    currentHighlight = layer;
+    layer.bringToFront();
+    const p = layer.kkprData;
+    const luasFormatted = p.Luas_KKPR ? `${p.Luas_KKPR} m²` : "-";
+    const pdfLink = `lampiran/${p.No_KKPR}.pdf`;
+    const popupContent = `
+      <table>
+        <tr><td>Nomor KKPR</td><td>${p.No_KKPR || "-"}</td></tr>
+        <tr><td>Nama Pemohon</td><td>${p.Nama_Usaha || "-"}</td></tr>
+        <tr><td>Kode KBLI</td><td>${p.KO_KBLI || "-"} 
+            <a href="https://oss.go.id/id/kbli" target="_blank" class="kbli-link">(Lihat di OSS)</a></td></tr>
+        <tr><td>Alamat</td><td>${p.Alamat || "-"}</td></tr>
+        <tr><td>Desa/Kelurahan</td><td>${p.Desa_Kel || "-"}</td></tr>
+        <tr><td>Kecamatan</td><td>${p.Kec || "-"}</td></tr>
+        <tr><td>Kota/Kabupaten</td><td>${p.KoKab || "-"}</td></tr>
+        <tr><td>Jenis KKPR yang Diterbitkan</td><td>${p.Jns_KKPR || "-"}</td></tr>
+        <tr><td>Penerbit KKPR</td><td>${p.Penerbit || "-"}</td></tr>
+        <tr><td>Tanggal Terbit Dokumen KKPR</td><td>${p.Tagl_Terbi || "-"}</td></tr>
+        <tr><td>Dasar Pertimbangan Penerbitan KKPR</td><td>${p.Ket_KKPR || "-"}</td></tr>
+        <tr><td>Luas KKPR berdasarkan Dokumen</td><td>${luasFormatted}</td></tr>
+      </table>
+      <br><a href="${pdfLink}" target="_blank">📄 Lihat Lampiran PDF</a>
+    `;
+    L.popup().setLatLng(latlng).setContent(popupContent).openOn(map);
+  };
+});
+
+// ================= Layer Toggle =================
+const toggleBtn = document.getElementById('layerToggle');
+const panel = document.getElementById('layerPanel');
+toggleBtn.addEventListener('click', ()=> panel.classList.toggle('show'));
+
+document.getElementById('osmLayer').addEventListener('change', e=> e.target.checked ? map.addLayer(osm) : map.removeLayer(osm));
+document.getElementById('satLayer').addEventListener('change', e=> e.target.checked ? map.addLayer(satelit) : map.removeLayer(satelit));
+document.getElementById('kkprLayer').addEventListener('change', e=> e.target.checked ? map.addLayer(kkprLayer) : map.removeLayer(kkprLayer));
+
+// ================= Load RTRW Jawa Barat =================
+const kabFiles = [
+  "RTRWP Kab Bandung.zip","RTRWP Kab Bogor.zip","RTRWP Kab Bekasi.zip",
+  "RTRWP Kab Purwakarta.zip","RTRWP Kab Karawang.zip","RTRWP Kab Subang.zip",
+  "RTRWP Kab Bandung Barat.zip","RTRWP Kab Cianjur.zip","RTRWP Kab Cirebon.zip",
+  "RTRWP Kab Indramayu.zip","RTRWP Kab Majalengka.zip","RTRWP Kab Kuningan.zip",
+  "RTRWP Kab Sumedang.zip","RTRWP Kota Bandung.zip","RTRWP Kota Cirebon.zip",
+  "RTRWP Kota Cimahi.zip"
+];
+kabFiles.forEach(file=>{
+  const kabName = file.replace("RTRWP ","").replace(".zip","");
+  loadRTRW("data/"+file, kabName);
+});
+
+// ================= Upload Shapefile & Analisis KKPR + RTRW =================
+const uploadedLayerGroup = L.layerGroup().addTo(map);
+let highlightedKKPR = [];
+
+document.getElementById('shpUpload').addEventListener('change', async function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async function(evt){
+    try {
+      const buffer = evt.target.result;
+      const geojson = await shp(buffer);
+      uploadedLayerGroup.clearLayers();
+      highlightedKKPR.forEach(k => k.setStyle({ color:"red", fillOpacity:0 }));
+      highlightedKKPR = [];
+
+      const layer = L.geoJSON(geojson, {
+        style: { color:'blue', weight:2, fillOpacity:0.3 },
+        onEachFeature: (feature, lyr)=>{
+          lyr.on('click', function(e){
+            const clickLatLng = e.latlng;
+
+            // KKPR yang bertampalan
+            const kkprHits = allKKPR.filter(k => k.getBounds().intersects(lyr.getBounds()));
+            let kkprText = "";
+            if(kkprHits.length===0){
+              kkprText = "Lokasi Tidak Bertampalan dengan KKPR Lainnya";
+            } else {
+              kkprText = "Lokasi Bertampalan dengan KKPR No: " + kkprHits.map(k=>`<a href="#" onclick="showKKPRInfo('${k.kkprData.No_KKPR}')">${k.kkprData.No_KKPR}</a>`).join(", ");
+              kkprHits.forEach(k=>{
+                k.setStyle({ color:"red", fillOpacity:0.7 });
+                highlightedKKPR.push(k);
+              });
+            }
+
+            // RTRW yang bertampalan
+            let rtrwZones = [];
+            Object.values(rtrwLayers).forEach(rLayerGroup=>{
+              rLayerGroup.eachLayer(rLayer=>{
+                if(lyr.getBounds().intersects(rLayer.getBounds())){
+                  rtrwZones.push(rLayer.feature?.properties?.NAMOBJ || "-");
+                }
+              });
+            });
+            rtrwZones = [...new Set(rtrwZones)];
+            const rtrwText = rtrwZones.length>0 ? rtrwZones.map(z=>`<a href="#" onclick="showRTRWInfo('${z}')">${z}</a>`).join("<br>") : "- Kawasan tidak diketahui";
+
+            let popupHtml = `<b>Analisis KKPR:</b><br>${kkprText}<br><br>`;
+            popupHtml += `<b>Analisis RTRW:</b><br>${rtrwText}`;
+
+            L.popup().setLatLng(clickLatLng).setContent(popupHtml).openOn(map);
+          });
+        }
+      }).addTo(uploadedLayerGroup);
+
+      map.fitBounds(layer.getBounds());
+      alert("Shapefile berhasil ditampilkan! Klik lokasi untuk analisis KKPR & RTRW.");
+    } catch(err){
+      console.error(err);
+      alert("Gagal membaca Shapefile. Pastikan ZIP berisi .shp, .shx, .dbf (dan opsional .prj)");
+    }
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+// ================= Fungsi Popup Info KKPR =================
+window.showKKPRInfo = function(noKKPR){
+  const layer = allKKPR.find(k => k.kkprData.No_KKPR === noKKPR);
+  if(!layer) return;
+  const p = layer.kkprData;
+  const luasFormatted = p.Luas_KKPR ? `${p.Luas_KKPR} m²` : "-";
+  const pdfLink = `lampiran/${p.No_KKPR}.pdf`;
+  const popupContent = `
+    <table>
+      <tr><td>Nomor KKPR</td><td>${p.No_KKPR || "-"}</td></tr>
+      <tr><td>Nama Pemohon</td><td>${p.Nama_Usaha || "-"}</td></tr>
+      <tr><td>Kode KBLI</td><td>${p.KO_KBLI || "-"} 
+          <a href="https://oss.go.id/id/kbli" target="_blank" class="kbli-link">(Lihat di OSS)</a></td></tr>
+      <tr><td>Alamat</td><td>${p.Alamat || "-"}</td></tr>
+      <tr><td>Desa/Kelurahan</td><td>${p.Desa_Kel || "-"}</td></tr>
+      <tr><td>Kecamatan</td><td>${p.Kec || "-"}</td></tr>
+      <tr><td>Kota/Kabupaten</td><td>${p.KoKab || "-"}</td></tr>
+      <tr><td>Jenis KKPR yang Diterbitkan</td><td>${p.Jns_KKPR || "-"}</td></tr>
+      <tr><td>Penerbit KKPR</td><td>${p.Penerbit || "-"}</td></tr>
+      <tr><td>Tanggal Terbit Dokumen KKPR</td><td>${p.Tagl_Terbi || "-"}</td></tr>
+      <tr><td>Dasar Pertimbangan Penerbitan KKPR</td><td>${p.Ket_KKPR || "-"}</td></tr>
+      <tr><td>Luas KKPR berdasarkan Dokumen</td><td>${luasFormatted}</td></tr>
+    </table>
+    <br><a href="${pdfLink}" target="_blank">📄 Lihat Lampiran PDF</a>
+  `;
+  L.popup().setLatLng(layer.getBounds().getCenter()).setContent(popupContent).openOn(map);
+}
+
+// ================= Fungsi Popup Info RTRW =================
+window.showRTRWInfo = function(namaZona){
+  let info = rtrwZoningInfo[namaZona];
+  let html = `<div class="zone-title">${namaZona}</div>`;
+  if(info){
+    html += ['allowed','conditional','forbidden'].map(key=>{
+      const arr = info[key];
+      if(!arr || arr.length===0) return '';
+      return `<div class="zone-section"><b>${key.charAt(0).toUpperCase()+key.slice(1)}:</b><ul>${arr.map(a=>`<li>${a}</li>`).join('')}</ul></div>`;
+    }).join('');
+  } else { html += "<i>Informasi zona tidak tersedia</i>"; }
+  L.popup().setLatLng(map.getCenter()).setContent(html).openOn(map);
+}
+</script>
+</body>
+</html>
